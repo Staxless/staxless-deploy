@@ -1,0 +1,74 @@
+name: Terraform Destroy
+description: Destroy cloud infrastructure using Terraform
+
+inputs:
+  cloud_provider:
+    description: Cloud provider (digitalocean)
+    required: false
+    default: digitalocean
+  do_token:
+    description: DigitalOcean API token
+    required: true
+  do_spaces_access_key:
+    description: DO Spaces access key for Terraform state
+    required: true
+  do_spaces_secret_key:
+    description: DO Spaces secret key for Terraform state
+    required: true
+  ssh_fingerprint:
+    description: SSH key fingerprint
+    required: true
+  domain:
+    description: Domain name
+    required: true
+  stack_name:
+    description: Name prefix for all resources
+    required: false
+    default: staxless
+  region:
+    description: Cloud region
+    required: false
+    default: nyc3
+  state_bucket:
+    description: S3-compatible bucket for Terraform state
+    required: false
+    default: staxless-terraform-state
+  state_key:
+    description: Key path within the state bucket
+    required: false
+    default: production/terraform.tfstate
+
+runs:
+  using: composite
+  steps:
+    - name: Terraform Init
+      shell: bash
+      working-directory: ${{ github.action_path }}/../../infrastructure/${{ inputs.cloud_provider }}
+      run: |
+        terraform init \
+          -backend-config="access_key=${{ inputs.do_spaces_access_key }}" \
+          -backend-config="secret_key=${{ inputs.do_spaces_secret_key }}" \
+          -backend-config="bucket=${{ inputs.state_bucket }}" \
+          -backend-config="key=${{ inputs.state_key }}"
+
+    - name: Terraform Destroy
+      shell: bash
+      working-directory: ${{ github.action_path }}/../../infrastructure/${{ inputs.cloud_provider }}
+      env:
+        TF_VAR_do_token: ${{ inputs.do_token }}
+        TF_VAR_ssh_fingerprint: ${{ inputs.ssh_fingerprint }}
+        TF_VAR_domain: ${{ inputs.domain }}
+        TF_VAR_stack_name: ${{ inputs.stack_name }}
+        TF_VAR_region: ${{ inputs.region }}
+      run: |
+        echo "Resources to be destroyed:"
+        terraform show
+
+        echo ""
+        echo "Starting destruction in 10 seconds..."
+        sleep 10
+
+        terraform destroy -auto-approve
+
+        echo "Infrastructure destroyed"
+        echo "MongoDB Atlas NOT destroyed - delete manually: https://cloud.mongodb.com"

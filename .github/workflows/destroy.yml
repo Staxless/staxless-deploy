@@ -1,0 +1,96 @@
+name: Destroy
+
+on:
+  workflow_call:
+    inputs:
+      confirm:
+        type: string
+        required: true
+        description: Type "DESTROY" to confirm destruction
+      cloud_provider:
+        type: string
+        default: digitalocean
+      stack_name:
+        type: string
+        default: staxless
+      region:
+        type: string
+        default: nyc3
+      state_bucket:
+        type: string
+        default: staxless-terraform-state
+      state_key:
+        type: string
+        default: production/terraform.tfstate
+    secrets:
+      SSH_PRIVATE_KEY:
+        required: true
+      MANAGER_IP:
+        required: true
+      DIGITALOCEAN_TOKEN:
+        required: true
+      DO_SPACES_ACCESS_KEY:
+        required: true
+      DO_SPACES_SECRET_KEY:
+        required: true
+      SSH_FINGERPRINT:
+        required: true
+      DOMAIN:
+        required: true
+
+jobs:
+  destroy:
+    name: Destroy Infrastructure
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Confirm destruction
+        run: |
+          if [ "${{ inputs.confirm }}" != "DESTROY" ]; then
+            echo "Must type DESTROY to confirm"
+            exit 1
+          fi
+
+      - name: Checkout staxless-deploy
+        uses: actions/checkout@v4
+        with:
+          repository: staxless/staxless-deploy
+          path: .staxless-deploy
+
+      - name: Setup SSH
+        uses: ./.staxless-deploy/actions/setup-ssh
+        with:
+          ssh_private_key: ${{ secrets.SSH_PRIVATE_KEY }}
+
+      - name: Setup Tools
+        uses: ./.staxless-deploy/actions/setup-tools
+        with:
+          do_token: ${{ secrets.DIGITALOCEAN_TOKEN }}
+          cloud_provider: ${{ inputs.cloud_provider }}
+
+      - name: Graceful Shutdown
+        uses: ./.staxless-deploy/actions/graceful-shutdown
+        with:
+          manager_ip: ${{ secrets.MANAGER_IP }}
+          stack_name: ${{ inputs.stack_name }}
+        continue-on-error: true
+
+      - name: Destroy Infrastructure
+        uses: ./.staxless-deploy/actions/terraform-destroy
+        with:
+          cloud_provider: ${{ inputs.cloud_provider }}
+          do_token: ${{ secrets.DIGITALOCEAN_TOKEN }}
+          do_spaces_access_key: ${{ secrets.DO_SPACES_ACCESS_KEY }}
+          do_spaces_secret_key: ${{ secrets.DO_SPACES_SECRET_KEY }}
+          ssh_fingerprint: ${{ secrets.SSH_FINGERPRINT }}
+          domain: ${{ secrets.DOMAIN }}
+          stack_name: ${{ inputs.stack_name }}
+          region: ${{ inputs.region }}
+          state_bucket: ${{ inputs.state_bucket }}
+          state_key: ${{ inputs.state_key }}
+
+      - name: Summary
+        run: |
+          echo "DigitalOcean infrastructure destroyed"
+          echo "MongoDB Atlas preserved"
+          echo "Delete manually: https://cloud.mongodb.com"

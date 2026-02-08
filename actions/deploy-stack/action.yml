@@ -1,0 +1,31 @@
+name: Deploy Stack
+description: SCP compose file to manager and deploy Docker stack
+
+inputs:
+  manager_ip:
+    description: Manager node public IP
+    required: true
+  compose_file:
+    description: Path to docker-compose production file
+    required: false
+    default: docker/compose/docker-compose.prod.yml
+  stack_name:
+    description: Docker stack name
+    required: false
+    default: staxless
+
+runs:
+  using: composite
+  steps:
+    - name: Copy compose file to manager
+      shell: bash
+      run: |
+        scp "${{ inputs.compose_file }}" root@${{ inputs.manager_ip }}:/root/stack.yml
+
+    - name: Deploy stack
+      shell: bash
+      run: |
+        ssh root@${{ inputs.manager_ip }} "docker stack deploy -c /root/stack.yml --with-registry-auth ${{ inputs.stack_name }}"
+        echo "Stack deployed: ${{ inputs.stack_name }}"
+        sleep 10
+        ssh root@${{ inputs.manager_ip }} "docker service ls"

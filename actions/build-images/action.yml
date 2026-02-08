@@ -1,0 +1,45 @@
+name: Build Images
+description: Build and push Docker images using docker buildx bake
+
+inputs:
+  services:
+    description: Comma-separated list of services to build, or "all"
+    required: false
+    default: all
+  bake_file:
+    description: Path to docker-bake.hcl file
+    required: false
+    default: docker/docker-bake.hcl
+  working_directory:
+    description: Working directory for the build (consumer repo root)
+    required: false
+    default: '.'
+
+runs:
+  using: composite
+  steps:
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Build and push images
+      shell: bash
+      working-directory: ${{ inputs.working_directory }}
+      run: |
+        SERVICES="${{ inputs.services }}"
+        BAKE_FILE="${{ inputs.bake_file }}"
+
+        echo "Building images for: $SERVICES"
+        echo "Bake file: $BAKE_FILE"
+
+        if [ "$SERVICES" = "all" ]; then
+          docker buildx bake -f "$BAKE_FILE" --push
+        else
+          IFS=',' read -ra SERVICE_LIST <<< "$SERVICES"
+          for service in "${SERVICE_LIST[@]}"; do
+            service=$(echo "$service" | xargs)
+            echo "Building $service..."
+            docker buildx bake -f "$BAKE_FILE" --push "$service"
+          done
+        fi
+
+        echo "Images built and pushed"

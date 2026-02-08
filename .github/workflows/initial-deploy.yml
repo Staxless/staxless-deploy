@@ -1,0 +1,186 @@
+name: Initial Deploy
+
+on:
+  workflow_call:
+    inputs:
+      cloud_provider:
+        type: string
+        default: digitalocean
+      region:
+        type: string
+        default: nyc3
+      manager_size:
+        type: string
+        default: s-2vcpu-4gb
+      worker_size:
+        type: string
+        default: s-2vcpu-4gb
+      worker_count:
+        type: string
+        default: '2'
+      stack_name:
+        type: string
+        default: staxless
+      compose_file:
+        type: string
+        default: docker/compose/docker-compose.prod.yml
+      bake_file:
+        type: string
+        default: docker/docker-bake.hcl
+      registry_type:
+        type: string
+        default: ghcr
+      domain:
+        type: string
+        required: true
+      mongodb_setup:
+        type: boolean
+        default: true
+      state_bucket:
+        type: string
+        default: staxless-terraform-state
+      state_key:
+        type: string
+        default: production/terraform.tfstate
+    secrets:
+      SSH_PRIVATE_KEY:
+        required: true
+      DIGITALOCEAN_TOKEN:
+        required: true
+      DO_SPACES_ACCESS_KEY:
+        required: true
+      DO_SPACES_SECRET_KEY:
+        required: true
+      SSH_FINGERPRINT:
+        required: true
+      MONGODB_ATLAS_PUBLIC_KEY:
+        required: false
+      MONGODB_ATLAS_PRIVATE_KEY:
+        required: false
+      MONGODB_ATLAS_PROJECT_ID:
+        required: false
+      DATABASE_URL:
+        required: false
+      GOOGLE_CLIENT_ID:
+        required: false
+      GOOGLE_CLIENT_SECRET:
+        required: false
+      GOOGLE_REDIRECT_URI:
+        required: false
+      GITHUB_CLIENT_ID:
+        required: false
+      GITHUB_CLIENT_SECRET:
+        required: false
+      STRIPE_PRIVATE_KEY:
+        required: false
+      STRIPE_WEBHOOK_SECRET:
+        required: false
+      MAILGUN_API_KEY:
+        required: false
+      CLOUDFLARE_TUNNEL_TOKEN:
+        required: false
+
+jobs:
+  deploy:
+    name: Initial Deployment
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout consumer repo
+        uses: actions/checkout@v4
+
+      - name: Checkout staxless-deploy
+        uses: actions/checkout@v4
+        with:
+          repository: staxless/staxless-deploy
+          path: .staxless-deploy
+
+      - name: Setup SSH
+        uses: ./.staxless-deploy/actions/setup-ssh
+        with:
+          ssh_private_key: ${{ secrets.SSH_PRIVATE_KEY }}
+
+      - name: Setup Tools
+        uses: ./.staxless-deploy/actions/setup-tools
+        with:
+          do_token: ${{ secrets.DIGITALOCEAN_TOKEN }}
+          cloud_provider: ${{ inputs.cloud_provider }}
+
+      - name: Provision Infrastructure
+        id: infra
+        uses: ./.staxless-deploy/actions/terraform-provision
+        with:
+          cloud_provider: ${{ inputs.cloud_provider }}
+          do_token: ${{ secrets.DIGITALOCEAN_TOKEN }}
+          do_spaces_access_key: ${{ secrets.DO_SPACES_ACCESS_KEY }}
+          do_spaces_secret_key: ${{ secrets.DO_SPACES_SECRET_KEY }}
+          ssh_fingerprint: ${{ secrets.SSH_FINGERPRINT }}
+          domain: ${{ inputs.domain }}
+          stack_name: ${{ inputs.stack_name }}
+          region: ${{ inputs.region }}
+          manager_size: ${{ inputs.manager_size }}
+          worker_size: ${{ inputs.worker_size }}
+          worker_count: ${{ inputs.worker_count }}
+          state_bucket: ${{ inputs.state_bucket }}
+          state_key: ${{ inputs.state_key }}
+
+      - name: Setup MongoDB Atlas
+        if: inputs.mongodb_setup
+        env:
+          MONGODB_ATLAS_PUBLIC_KEY: ${{ secrets.MONGODB_ATLAS_PUBLIC_KEY }}
+          MONGODB_ATLAS_PRIVATE_KEY: ${{ secrets.MONGODB_ATLAS_PRIVATE_KEY }}
+          MONGODB_ATLAS_PROJECT_ID: ${{ secrets.MONGODB_ATLAS_PROJECT_ID }}
+          ALL_NODE_IPS: ${{ steps.infra.outputs.all_node_ips }}
+        run: bash .staxless-deploy/scripts/infrastructure/setup-mongodb-atlas.sh
+
+      - name: Initialize Swarm
+        uses: ./.staxless-deploy/actions/init-swarm
+        with:
+          manager_ip: ${{ steps.infra.outputs.manager_ip }}
+          worker_ips: ${{ steps.infra.outputs.worker_ips }}
+
+      - name: Registry Login
+        uses: ./.staxless-deploy/actions/registry-login
+        with:
+          registry_type: ${{ inputs.registry_type }}
+          github_token: ${{ github.token }}
+          github_actor: ${{ github.actor }}
+          do_token: ${{ secrets.DIGITALOCEAN_TOKEN }}
+
+      - name: Create Secrets
+        uses: ./.staxless-deploy/actions/create-secrets
+        with:
+          manager_ip: ${{ steps.infra.outputs.manager_ip }}
+          secrets_json: |
+            {
+              "DATABASE_URL": "${{ secrets.DATABASE_URL || env.DATABASE_URL }}",
+              "DATABASE_NAME": "${{ inputs.stack_name }}",
+              "GOOGLE_CLIENT_ID": "${{ secrets.GOOGLE_CLIENT_ID }}",
+              "GOOGLE_CLIENT_SECRET": "${{ secrets.GOOGLE_CLIENT_SECRET }}",
+              "GOOGLE_REDIRECT_URI": "${{ secrets.GOOGLE_REDIRECT_URI }}",
+              "GITHUB_CLIENT_ID": "${{ secrets.GITHUB_CLIENT_ID }}",
+              "GITHUB_CLIENT_SECRET": "${{ secrets.GITHUB_CLIENT_SECRET }}",
+              "STRIPE_PRIVATE_KEY": "${{ secrets.STRIPE_PRIVATE_KEY }}",
+              "STRIPE_WEBHOOK_SECRET": "${{ secrets.STRIPE_WEBHOOK_SECRET }}",
+              "MAILGUN_API_KEY": "${{ secrets.MAILGUN_API_KEY }}",
+              "CLOUDFLARE_TUNNEL_TOKEN": "${{ secrets.CLOUDFLARE_TUNNEL_TOKEN }}"
+            }
+
+      - name: Build Images
+        uses: ./.staxless-deploy/actions/build-images
+        with:
+          services: all
+          bake_file: ${{ inputs.bake_file }}
+
+      - name: Deploy Stack
+        uses: ./.staxless-deploy/actions/deploy-stack
+        with:
+          manager_ip: ${{ steps.infra.outputs.manager_ip }}
+          compose_file: ${{ inputs.compose_file }}
+          stack_name: ${{ inputs.stack_name }}
+
+      - name: Health Check
+        uses: ./.staxless-deploy/actions/health-check
+        with:
+          manager_ip: ${{ steps.infra.outputs.manager_ip }}
+          stack_name: ${{ inputs.stack_name }}

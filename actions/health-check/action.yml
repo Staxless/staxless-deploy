@@ -1,0 +1,58 @@
+name: Health Check
+description: Verify all Docker Swarm services have desired replica counts
+
+inputs:
+  manager_ip:
+    description: Manager node public IP
+    required: true
+  wait_seconds:
+    description: Seconds to wait before checking
+    required: false
+    default: '30'
+  stack_name:
+    description: Docker stack name to filter services
+    required: false
+    default: staxless
+
+runs:
+  using: composite
+  steps:
+    - name: Wait for services to stabilize
+      shell: bash
+      run: |
+        echo "Waiting ${{ inputs.wait_seconds }}s for services to stabilize..."
+        sleep ${{ inputs.wait_seconds }}
+
+    - name: Check service health
+      shell: bash
+      run: |
+        MANAGER_IP="${{ inputs.manager_ip }}"
+        STACK="${{ inputs.stack_name }}"
+
+        echo "Checking service health..."
+
+        FAILED=0
+        while IFS= read -r line; do
+          SERVICE=$(echo "$line" | awk '{print $1}')
+          REPLICAS=$(echo "$line" | awk '{print $2}')
+          RUNNING=$(echo "$REPLICAS" | cut -d'/' -f1)
+          DESIRED=$(echo "$REPLICAS" | cut -d'/' -f2)
+
+          if [ "$RUNNING" != "$DESIRED" ]; then
+            echo "UNHEALTHY: $SERVICE ($RUNNING/$DESIRED replicas)"
+            FAILED=1
+          else
+            echo "HEALTHY: $SERVICE ($RUNNING/$DESIRED replicas)"
+          fi
+        done <<< "$(ssh root@"$MANAGER_IP" "docker service ls --filter name=${STACK}_ --format '{{.Name}} {{.Replicas}}'")"
+
+        if [ "$FAILED" -eq 1 ]; then
+          echo ""
+          echo "Service details:"
+          ssh root@"$MANAGER_IP" "docker service ls"
+          echo ""
+          echo "One or more services are unhealthy"
+          exit 1
+        fi
+
+        echo "All services healthy"

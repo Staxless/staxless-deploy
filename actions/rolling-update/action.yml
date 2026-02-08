@@ -1,0 +1,75 @@
+name: Rolling Update
+description: Perform zero-downtime rolling updates with automatic rollback
+
+inputs:
+  manager_ip:
+    description: Manager node public IP
+    required: true
+  services:
+    description: Comma-separated list of services to update, or "all"
+    required: false
+    default: all
+  stack_name:
+    description: Docker stack name
+    required: false
+    default: staxless
+
+runs:
+  using: composite
+  steps:
+    - name: Rolling update services
+      shell: bash
+      run: |
+        MANAGER_IP="${{ inputs.manager_ip }}"
+        SERVICES="${{ inputs.services }}"
+        STACK="${{ inputs.stack_name }}"
+
+        echo "Rolling update for: $SERVICES"
+
+        if [ "$SERVICES" = "all" ]; then
+          SERVICE_LIST=$(ssh root@"$MANAGER_IP" "docker service ls --format '{{.Name}}' | grep '^${STACK}_'")
+        else
+          SERVICE_LIST=""
+          IFS=',' read -ra SERVICE_NAMES <<< "$SERVICES"
+          for service in "${SERVICE_NAMES[@]}"; do
+            service=$(echo "$service" | xargs)
+            SERVICE_LIST="$SERVICE_LIST ${STACK}_${service}"
+          done
+        fi
+
+        FAILED=0
+        for service in $SERVICE_LIST; do
+          echo "Updating: $service"
+
+          CURRENT_IMAGE=$(ssh root@"$MANAGER_IP" "docker service inspect $service --format '{{.Spec.TaskTemplate.ContainerSpec.Image}}'")
+          IMAGE_BASE=$(echo "$CURRENT_IMAGE" | cut -d: -f1)
+          NEW_IMAGE="${IMAGE_BASE}:latest"
+
+          ssh root@"$MANAGER_IP" "docker service update \
+            --image $NEW_IMAGE \
+            --update-parallelism 1 \
+            --update-delay 10s \
+            --update-failure-action rollback \
+            --update-monitor 30s \
+            $service"
+
+          sleep 5
+
+          UPDATE_STATUS=$(ssh root@"$MANAGER_IP" "docker service inspect $service --format '{{.UpdateStatus.State}}'")
+
+          if [ "$UPDATE_STATUS" = "completed" ]; then
+            echo "$service updated successfully"
+          elif [ "$UPDATE_STATUS" = "rollback_completed" ]; then
+            echo "FAILED: $service rolled back"
+            FAILED=1
+          else
+            echo "$service status: $UPDATE_STATUS"
+          fi
+        done
+
+        if [ "$FAILED" -eq 1 ]; then
+          echo "One or more services failed to update"
+          exit 1
+        fi
+
+        echo "All services updated"

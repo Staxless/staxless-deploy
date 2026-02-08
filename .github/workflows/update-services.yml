@@ -1,0 +1,75 @@
+name: Update Services
+
+on:
+  workflow_call:
+    inputs:
+      services:
+        type: string
+        default: all
+        description: Comma-separated list of services to update, or "all"
+      stack_name:
+        type: string
+        default: staxless
+      compose_file:
+        type: string
+        default: docker/compose/docker-compose.prod.yml
+      bake_file:
+        type: string
+        default: docker/docker-bake.hcl
+      registry_type:
+        type: string
+        default: ghcr
+    secrets:
+      SSH_PRIVATE_KEY:
+        required: true
+      MANAGER_IP:
+        required: true
+      DIGITALOCEAN_TOKEN:
+        required: false
+
+jobs:
+  update:
+    name: Rolling Update
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout consumer repo
+        uses: actions/checkout@v4
+
+      - name: Checkout staxless-deploy
+        uses: actions/checkout@v4
+        with:
+          repository: staxless/staxless-deploy
+          path: .staxless-deploy
+
+      - name: Setup SSH
+        uses: ./.staxless-deploy/actions/setup-ssh
+        with:
+          ssh_private_key: ${{ secrets.SSH_PRIVATE_KEY }}
+
+      - name: Registry Login
+        uses: ./.staxless-deploy/actions/registry-login
+        with:
+          registry_type: ${{ inputs.registry_type }}
+          github_token: ${{ github.token }}
+          github_actor: ${{ github.actor }}
+          do_token: ${{ secrets.DIGITALOCEAN_TOKEN }}
+
+      - name: Build Images
+        uses: ./.staxless-deploy/actions/build-images
+        with:
+          services: ${{ inputs.services }}
+          bake_file: ${{ inputs.bake_file }}
+
+      - name: Rolling Update
+        uses: ./.staxless-deploy/actions/rolling-update
+        with:
+          manager_ip: ${{ secrets.MANAGER_IP }}
+          services: ${{ inputs.services }}
+          stack_name: ${{ inputs.stack_name }}
+
+      - name: Health Check
+        uses: ./.staxless-deploy/actions/health-check
+        with:
+          manager_ip: ${{ secrets.MANAGER_IP }}
+          stack_name: ${{ inputs.stack_name }}

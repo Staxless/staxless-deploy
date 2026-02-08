@@ -1,0 +1,65 @@
+name: Graceful Shutdown
+description: Gracefully scale down, remove services, and leave swarm
+
+inputs:
+  manager_ip:
+    description: Manager node public IP
+    required: true
+  stack_name:
+    description: Docker stack name
+    required: false
+    default: staxless
+
+runs:
+  using: composite
+  steps:
+    - name: Graceful shutdown
+      shell: bash
+      run: |
+        MANAGER_IP="${{ inputs.manager_ip }}"
+        STACK="${{ inputs.stack_name }}"
+
+        echo "Starting graceful shutdown..."
+
+        # Check connectivity
+        if ! ssh -o ConnectTimeout=5 root@"$MANAGER_IP" "echo ready" 2>/dev/null; then
+          echo "Manager not reachable - skipping shutdown"
+          exit 0
+        fi
+
+        # Get services
+        SERVICES=$(ssh root@"$MANAGER_IP" "docker service ls --format '{{.Name}}' | grep '^${STACK}_'" 2>/dev/null || echo "")
+
+        if [ -z "$SERVICES" ]; then
+          echo "No services found"
+          exit 0
+        fi
+
+        # Step 1: Scale down
+        echo "Step 1: Scaling down services..."
+        for service in $SERVICES; do
+          echo "Scaling down: $service"
+          ssh root@"$MANAGER_IP" "docker service scale $service=0" || true
+          sleep 2
+        done
+
+        echo "Waiting 30 seconds for drain..."
+        sleep 30
+
+        # Step 2: Remove services
+        echo "Step 2: Removing services..."
+        for service in $SERVICES; do
+          ssh root@"$MANAGER_IP" "docker service rm $service" || true
+        done
+        sleep 10
+
+        # Step 3: Remove stack
+        echo "Step 3: Removing stack..."
+        ssh root@"$MANAGER_IP" "docker stack rm $STACK" 2>/dev/null || true
+        sleep 20
+
+        # Step 4: Leave swarm
+        echo "Step 4: Leaving swarm..."
+        ssh root@"$MANAGER_IP" "docker swarm leave --force" 2>/dev/null || true
+
+        echo "Graceful shutdown complete"

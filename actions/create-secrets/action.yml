@@ -1,0 +1,33 @@
+name: Create Secrets
+description: Create Docker Swarm secrets via SSH (fixed variable expansion)
+
+inputs:
+  manager_ip:
+    description: Manager node public IP
+    required: true
+  secrets_json:
+    description: 'JSON object of secret_name:secret_value pairs to create'
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Create Docker secrets
+      shell: bash
+      run: |
+        echo "Creating Docker secrets..."
+        MANAGER_IP="${{ inputs.manager_ip }}"
+
+        # Parse JSON and create each secret individually via piped commands
+        # This avoids the heredoc variable expansion bug (single-quoted SSHEOF)
+        echo '${{ inputs.secrets_json }}' | jq -r 'to_entries[] | "\(.key) \(.value)"' | while read -r SECRET_NAME SECRET_VALUE; do
+          if [ -n "$SECRET_VALUE" ] && [ "$SECRET_VALUE" != "null" ] && [ "$SECRET_VALUE" != "" ]; then
+            echo "Creating secret: $SECRET_NAME"
+            printf '%s' "$SECRET_VALUE" | ssh root@"$MANAGER_IP" "docker secret create $SECRET_NAME - 2>/dev/null" || echo "$SECRET_NAME already exists"
+          else
+            echo "Skipping $SECRET_NAME (empty value)"
+          fi
+        done
+
+        echo "Secrets created:"
+        ssh root@"$MANAGER_IP" "docker secret ls"

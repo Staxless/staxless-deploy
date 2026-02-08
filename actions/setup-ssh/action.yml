@@ -1,0 +1,30 @@
+name: Setup SSH
+description: Write SSH private key and configure known_hosts for remote access
+
+inputs:
+  ssh_private_key:
+    description: SSH private key for connecting to droplets
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Write SSH key
+      shell: bash
+      run: |
+        mkdir -p ~/.ssh
+        echo "${{ inputs.ssh_private_key }}" > ~/.ssh/id_rsa
+        chmod 600 ~/.ssh/id_rsa
+
+    - name: Configure SSH
+      shell: bash
+      run: |
+        cat >> ~/.ssh/config << 'EOF'
+        Host *
+          StrictHostKeyChecking accept-new
+          UserKnownHostsFile ~/.ssh/known_hosts
+          ServerAliveInterval 60
+          ServerAliveCountMax 3
+          ConnectTimeout 10
+        EOF
+        chmod 600 ~/.ssh/config
