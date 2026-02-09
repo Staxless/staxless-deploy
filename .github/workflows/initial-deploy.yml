@@ -20,7 +20,7 @@ on:
         default: '2'
       stack_name:
         type: string
-        default: staxless
+        default: ''
       compose_file:
         type: string
         default: docker/compose/docker-compose.prod.yml
@@ -41,7 +41,7 @@ on:
         default: staxless-terraform-state
       state_key:
         type: string
-        default: production/terraform.tfstate
+        default: ''
     secrets:
       SSH_PRIVATE_KEY:
         required: true
@@ -95,6 +95,18 @@ jobs:
           repository: staxless/staxless-deploy
           path: .staxless-deploy
 
+      - name: Resolve Config
+        id: config
+        uses: ./.staxless-deploy/actions/resolve-config
+        with:
+          stack_name: ${{ inputs.stack_name }}
+          region: ${{ inputs.region }}
+          manager_size: ${{ inputs.manager_size }}
+          worker_size: ${{ inputs.worker_size }}
+          worker_count: ${{ inputs.worker_count }}
+          compose_file: ${{ inputs.compose_file }}
+          bake_file: ${{ inputs.bake_file }}
+
       - name: Setup SSH
         uses: ./.staxless-deploy/actions/setup-ssh
         with:
@@ -116,13 +128,13 @@ jobs:
           do_spaces_secret_key: ${{ secrets.DO_SPACES_SECRET_KEY }}
           ssh_fingerprint: ${{ secrets.SSH_FINGERPRINT }}
           domain: ${{ inputs.domain }}
-          stack_name: ${{ inputs.stack_name }}
-          region: ${{ inputs.region }}
-          manager_size: ${{ inputs.manager_size }}
-          worker_size: ${{ inputs.worker_size }}
-          worker_count: ${{ inputs.worker_count }}
+          stack_name: ${{ steps.config.outputs.stack_name }}
+          region: ${{ steps.config.outputs.region }}
+          manager_size: ${{ steps.config.outputs.manager_size }}
+          worker_size: ${{ steps.config.outputs.worker_size }}
+          worker_count: ${{ steps.config.outputs.worker_count }}
           state_bucket: ${{ inputs.state_bucket }}
-          state_key: ${{ inputs.state_key }}
+          state_key: ${{ inputs.state_key || format('{0}/terraform.tfstate', steps.config.outputs.stack_name) }}
 
       - name: Setup MongoDB Atlas
         if: inputs.mongodb_setup
@@ -154,7 +166,7 @@ jobs:
           secrets_json: |
             {
               "DATABASE_URL": "${{ secrets.DATABASE_URL || env.DATABASE_URL }}",
-              "DATABASE_NAME": "${{ inputs.stack_name }}",
+              "DATABASE_NAME": "${{ steps.config.outputs.stack_name }}",
               "GOOGLE_CLIENT_ID": "${{ secrets.GOOGLE_CLIENT_ID }}",
               "GOOGLE_CLIENT_SECRET": "${{ secrets.GOOGLE_CLIENT_SECRET }}",
               "GOOGLE_REDIRECT_URI": "${{ secrets.GOOGLE_REDIRECT_URI }}",
@@ -170,17 +182,17 @@ jobs:
         uses: ./.staxless-deploy/actions/build-images
         with:
           services: all
-          bake_file: ${{ inputs.bake_file }}
+          bake_file: ${{ steps.config.outputs.bake_file }}
 
       - name: Deploy Stack
         uses: ./.staxless-deploy/actions/deploy-stack
         with:
           manager_ip: ${{ steps.infra.outputs.manager_ip }}
-          compose_file: ${{ inputs.compose_file }}
-          stack_name: ${{ inputs.stack_name }}
+          compose_file: ${{ steps.config.outputs.compose_file }}
+          stack_name: ${{ steps.config.outputs.stack_name }}
 
       - name: Health Check
         uses: ./.staxless-deploy/actions/health-check
         with:
           manager_ip: ${{ steps.infra.outputs.manager_ip }}
-          stack_name: ${{ inputs.stack_name }}
+          stack_name: ${{ steps.config.outputs.stack_name }}

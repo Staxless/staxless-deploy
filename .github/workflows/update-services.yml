@@ -9,13 +9,13 @@ on:
         description: Comma-separated list of services to update, or "all"
       stack_name:
         type: string
-        default: staxless
+        default: ''
       compose_file:
         type: string
-        default: docker/compose/docker-compose.prod.yml
+        default: ''
       bake_file:
         type: string
-        default: docker/docker-bake.hcl
+        default: ''
       registry_type:
         type: string
         default: ghcr
@@ -42,6 +42,14 @@ jobs:
           repository: staxless/staxless-deploy
           path: .staxless-deploy
 
+      - name: Resolve Config
+        id: config
+        uses: ./.staxless-deploy/actions/resolve-config
+        with:
+          stack_name: ${{ inputs.stack_name }}
+          compose_file: ${{ inputs.compose_file }}
+          bake_file: ${{ inputs.bake_file }}
+
       - name: Setup SSH
         uses: ./.staxless-deploy/actions/setup-ssh
         with:
@@ -59,17 +67,17 @@ jobs:
         uses: ./.staxless-deploy/actions/build-images
         with:
           services: ${{ inputs.services }}
-          bake_file: ${{ inputs.bake_file }}
+          bake_file: ${{ steps.config.outputs.bake_file }}
 
       - name: Rolling Update
         uses: ./.staxless-deploy/actions/rolling-update
         with:
           manager_ip: ${{ secrets.MANAGER_IP }}
           services: ${{ inputs.services }}
-          stack_name: ${{ inputs.stack_name }}
+          stack_name: ${{ steps.config.outputs.stack_name }}
 
       - name: Health Check
         uses: ./.staxless-deploy/actions/health-check
         with:
           manager_ip: ${{ secrets.MANAGER_IP }}
-          stack_name: ${{ inputs.stack_name }}
+          stack_name: ${{ steps.config.outputs.stack_name }}

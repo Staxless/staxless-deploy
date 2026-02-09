@@ -12,16 +12,16 @@ on:
         default: digitalocean
       stack_name:
         type: string
-        default: staxless
+        default: ''
       region:
         type: string
-        default: nyc3
+        default: ''
       state_bucket:
         type: string
         default: staxless-terraform-state
       state_key:
         type: string
-        default: production/terraform.tfstate
+        default: ''
     secrets:
       SSH_PRIVATE_KEY:
         required: true
@@ -51,11 +51,21 @@ jobs:
             exit 1
           fi
 
+      - name: Checkout consumer repo
+        uses: actions/checkout@v4
+
       - name: Checkout staxless-deploy
         uses: actions/checkout@v4
         with:
           repository: staxless/staxless-deploy
           path: .staxless-deploy
+
+      - name: Resolve Config
+        id: config
+        uses: ./.staxless-deploy/actions/resolve-config
+        with:
+          stack_name: ${{ inputs.stack_name }}
+          region: ${{ inputs.region }}
 
       - name: Setup SSH
         uses: ./.staxless-deploy/actions/setup-ssh
@@ -72,7 +82,7 @@ jobs:
         uses: ./.staxless-deploy/actions/graceful-shutdown
         with:
           manager_ip: ${{ secrets.MANAGER_IP }}
-          stack_name: ${{ inputs.stack_name }}
+          stack_name: ${{ steps.config.outputs.stack_name }}
         continue-on-error: true
 
       - name: Destroy Infrastructure
@@ -84,10 +94,10 @@ jobs:
           do_spaces_secret_key: ${{ secrets.DO_SPACES_SECRET_KEY }}
           ssh_fingerprint: ${{ secrets.SSH_FINGERPRINT }}
           domain: ${{ secrets.DOMAIN }}
-          stack_name: ${{ inputs.stack_name }}
-          region: ${{ inputs.region }}
+          stack_name: ${{ steps.config.outputs.stack_name }}
+          region: ${{ steps.config.outputs.region }}
           state_bucket: ${{ inputs.state_bucket }}
-          state_key: ${{ inputs.state_key }}
+          state_key: ${{ inputs.state_key || format('{0}/terraform.tfstate', steps.config.outputs.stack_name) }}
 
       - name: Summary
         run: |
