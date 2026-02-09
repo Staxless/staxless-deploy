@@ -44,12 +44,6 @@ variable "worker_count" {
   default     = 2
 }
 
-variable "vpc_cidr" {
-  description = "VPC CIDR block"
-  type        = string
-  default     = "10.17.0.0/16"
-}
-
 variable "authorized_ssh_ips" {
   description = "IP addresses authorized for SSH access"
   type        = list(string)

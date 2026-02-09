@@ -25,9 +25,12 @@ provider "digitalocean" {
 }
 
 resource "digitalocean_vpc" "main" {
-  name     = "${var.stack_name}-vpc"
-  region   = var.region
-  ip_range = var.vpc_cidr
+  name   = "${var.stack_name}-vpc"
+  region = var.region
+
+  lifecycle {
+    ignore_changes = [ip_range]
+  }
 }
 
 resource "digitalocean_droplet" "manager" {
