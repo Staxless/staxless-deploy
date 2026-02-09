@@ -14,13 +14,32 @@ done
 API_BASE="https://cloud.mongodb.com/api/atlas/v2"
 PROJECT_ID="$MONGODB_ATLAS_PROJECT_ID"
 
-# Helper: make an Atlas API call and fail on HTTP errors
+# Helper: make an Atlas API call, print response body, and fail on HTTP errors
 atlas_api() {
   local method="$1" url="$2" data="$3"
-  local args=(-s -f -X "$method" --user "$MONGODB_ATLAS_PUBLIC_KEY:$MONGODB_ATLAS_PRIVATE_KEY" --digest)
+  local tmpfile
+  tmpfile=$(mktemp)
+
+  local args=(-s -w "\n%{http_code}" -X "$method" --user "$MONGODB_ATLAS_PUBLIC_KEY:$MONGODB_ATLAS_PRIVATE_KEY" --digest)
   args+=(--header "Content-Type: application/json" --header "Accept: application/vnd.atlas.2024-08-05+json")
   [ -n "$data" ] && args+=(--data "$data")
-  curl "${args[@]}" "$url"
+
+  local output
+  output=$(curl "${args[@]}" "$url")
+  local http_code
+  http_code=$(echo "$output" | tail -1)
+  local body
+  body=$(echo "$output" | sed '$d')
+
+  if [ "$http_code" -ge 400 ] 2>/dev/null; then
+    echo "Atlas API error ($method $url): HTTP $http_code"
+    echo "$body"
+    rm -f "$tmpfile"
+    return 1
+  fi
+
+  rm -f "$tmpfile"
+  echo "$body"
 }
 
 # Generate random password
