@@ -83,6 +83,68 @@ runs:
           -backend-config="bucket=${{ inputs.state_bucket }}" \
           -backend-config="key=${{ inputs.state_key }}"
 
+    - name: Import Existing Resources
+      shell: bash
+      working-directory: ${{ github.action_path }}/../../infrastructure/${{ inputs.cloud_provider }}
+      env:
+        TF_VAR_do_token: ${{ inputs.do_token }}
+        TF_VAR_ssh_fingerprint: ${{ inputs.ssh_fingerprint }}
+        TF_VAR_domain: ${{ inputs.domain }}
+        TF_VAR_stack_name: ${{ inputs.stack_name }}
+        TF_VAR_region: ${{ inputs.region }}
+        TF_VAR_manager_size: ${{ inputs.manager_size }}
+        TF_VAR_worker_size: ${{ inputs.worker_size }}
+        TF_VAR_worker_count: ${{ inputs.worker_count }}
+        DO_TOKEN: ${{ inputs.do_token }}
+      run: |
+        STACK="${{ inputs.stack_name }}"
+        API="https://api.digitalocean.com/v2"
+        AUTH="Authorization: Bearer $DO_TOKEN"
+
+        # Import VPC if it exists in DO but not in state
+        if ! terraform state show digitalocean_vpc.main &>/dev/null; then
+          VPC_ID=$(curl -s -H "$AUTH" "$API/vpcs?per_page=200" \
+            | jq -r --arg name "${STACK}-vpc" '.vpcs[] | select(.name == $name) | .id')
+          if [ -n "$VPC_ID" ]; then
+            echo "Importing existing VPC: $VPC_ID"
+            terraform import digitalocean_vpc.main "$VPC_ID"
+          fi
+        fi
+
+        # Import manager droplet if it exists in DO but not in state
+        if ! terraform state show digitalocean_droplet.manager &>/dev/null; then
+          MANAGER_ID=$(curl -s -H "$AUTH" "$API/droplets?tag_name=${STACK}&per_page=200" \
+            | jq -r --arg name "${STACK}-manager" '.droplets[] | select(.name == $name) | .id')
+          if [ -n "$MANAGER_ID" ]; then
+            echo "Importing existing manager droplet: $MANAGER_ID"
+            terraform import digitalocean_droplet.manager "$MANAGER_ID"
+          fi
+        fi
+
+        # Import worker droplets if they exist in DO but not in state
+        WORKERS=$(curl -s -H "$AUTH" "$API/droplets?tag_name=${STACK}&per_page=200" \
+          | jq -r --arg prefix "${STACK}-worker-" '.droplets[] | select(.name | startswith($prefix)) | "\(.name) \(.id)"')
+        if [ -n "$WORKERS" ]; then
+          while IFS=' ' read -r wname wid; do
+            INDEX=$(echo "$wname" | sed "s/${STACK}-worker-//")
+            TADDR="digitalocean_droplet.workers[$((INDEX - 1))]"
+            if ! terraform state show "$TADDR" &>/dev/null; then
+              echo "Importing existing worker: $wname ($wid)"
+              terraform import "$TADDR" "$wid"
+            fi
+          done <<< "$WORKERS"
+        fi
+
+        # Import firewall if it exists in DO but not in state
+        if ! terraform state show digitalocean_firewall.main &>/dev/null; then
+          FW_ID=$(curl -s -H "$AUTH" "$API/firewalls?per_page=200" \
+            | jq -r --arg name "${STACK}-firewall" '.firewalls[] | select(.name == $name) | .id')
+          if [ -n "$FW_ID" ]; then
+            echo "Importing existing firewall: $FW_ID"
+            terraform import digitalocean_firewall.main "$FW_ID"
+          fi
+        fi
+
     - name: Terraform Plan & Apply
       shell: bash
       working-directory: ${{ github.action_path }}/../../infrastructure/${{ inputs.cloud_provider }}
