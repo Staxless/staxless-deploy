@@ -81,10 +81,19 @@ on:
         required: false
 
 jobs:
-  deploy:
-    name: Initial Deployment
+  # ── Phase 1: Provision infrastructure ──────────────────────────
+  provision:
+    name: Provision Infrastructure
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 30
+    outputs:
+      manager_ip: ${{ steps.infra.outputs.manager_ip }}
+      worker_ips: ${{ steps.infra.outputs.worker_ips }}
+      all_node_ips: ${{ steps.infra.outputs.all_node_ips }}
+      stack_name: ${{ steps.config.outputs.stack_name }}
+      compose_file: ${{ steps.config.outputs.compose_file }}
+      bake_file: ${{ steps.config.outputs.bake_file }}
+      database_url: ${{ steps.mongodb_out.outputs.database_url }}
     steps:
       - name: Checkout consumer repo
         uses: actions/checkout@v4
@@ -145,11 +154,30 @@ jobs:
           ALL_NODE_IPS: ${{ steps.infra.outputs.all_node_ips }}
         run: bash .staxless-deploy/scripts/infrastructure/setup-mongodb-atlas.sh
 
-      - name: Initialize Swarm
-        uses: ./.staxless-deploy/actions/init-swarm
+      - name: Capture MongoDB URL
+        id: mongodb_out
+        if: inputs.mongodb_setup
+        run: |
+          if [ -n "$DATABASE_URL" ]; then
+            echo "::add-mask::$DATABASE_URL"
+            echo "database_url=$DATABASE_URL" >> "$GITHUB_OUTPUT"
+          fi
+
+  # ── Phase 2: Build images + Setup swarm (parallel) ────────────
+  build-images:
+    name: Build Images
+    needs: provision
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout consumer repo
+        uses: actions/checkout@v4
+
+      - name: Checkout staxless-deploy
+        uses: actions/checkout@v4
         with:
-          manager_ip: ${{ steps.infra.outputs.manager_ip }}
-          worker_ips: ${{ steps.infra.outputs.worker_ips }}
+          repository: staxless/staxless-deploy
+          path: .staxless-deploy
 
       - name: Registry Login
         uses: ./.staxless-deploy/actions/registry-login
@@ -159,14 +187,49 @@ jobs:
           github_actor: ${{ github.actor }}
           do_token: ${{ secrets.DIGITALOCEAN_TOKEN }}
 
+      - name: Build Images
+        uses: ./.staxless-deploy/actions/build-images
+        with:
+          services: all
+          bake_file: ${{ needs.provision.outputs.bake_file }}
+
+  setup-swarm:
+    name: Setup Swarm
+    needs: provision
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout staxless-deploy
+        uses: actions/checkout@v4
+        with:
+          repository: staxless/staxless-deploy
+          path: .staxless-deploy
+
+      - name: Setup SSH
+        uses: ./.staxless-deploy/actions/setup-ssh
+        with:
+          ssh_private_key: ${{ secrets.SSH_PRIVATE_KEY }}
+
+      - name: Whitelist SSH
+        uses: ./.staxless-deploy/actions/whitelist-ssh
+        with:
+          do_token: ${{ secrets.DIGITALOCEAN_TOKEN }}
+          stack_name: ${{ needs.provision.outputs.stack_name }}
+
+      - name: Initialize Swarm
+        uses: ./.staxless-deploy/actions/init-swarm
+        with:
+          manager_ip: ${{ needs.provision.outputs.manager_ip }}
+          worker_ips: ${{ needs.provision.outputs.worker_ips }}
+
       - name: Create Secrets
         uses: ./.staxless-deploy/actions/create-secrets
         with:
-          manager_ip: ${{ steps.infra.outputs.manager_ip }}
+          manager_ip: ${{ needs.provision.outputs.manager_ip }}
           secrets_json: |
             {
-              "DATABASE_URL": "${{ secrets.DATABASE_URL || env.DATABASE_URL }}",
-              "DATABASE_NAME": "${{ steps.config.outputs.stack_name }}",
+              "DATABASE_URL": "${{ secrets.DATABASE_URL || needs.provision.outputs.database_url }}",
+              "DATABASE_NAME": "${{ needs.provision.outputs.stack_name }}",
               "GOOGLE_CLIENT_ID": "${{ secrets.GOOGLE_CLIENT_ID }}",
               "GOOGLE_CLIENT_SECRET": "${{ secrets.GOOGLE_CLIENT_SECRET }}",
               "GOOGLE_REDIRECT_URI": "${{ secrets.GOOGLE_REDIRECT_URI }}",
@@ -178,21 +241,56 @@ jobs:
               "CLOUDFLARE_TUNNEL_TOKEN": "${{ secrets.CLOUDFLARE_TUNNEL_TOKEN }}"
             }
 
-      - name: Build Images
-        uses: ./.staxless-deploy/actions/build-images
+  # ── Phase 3: Deploy (waits for both build + swarm) ────────────
+  deploy:
+    name: Deploy Stack
+    needs: [provision, build-images, setup-swarm]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout consumer repo
+        uses: actions/checkout@v4
+
+      - name: Checkout staxless-deploy
+        uses: actions/checkout@v4
         with:
-          services: all
-          bake_file: ${{ steps.config.outputs.bake_file }}
+          repository: staxless/staxless-deploy
+          path: .staxless-deploy
+
+      - name: Setup SSH
+        uses: ./.staxless-deploy/actions/setup-ssh
+        with:
+          ssh_private_key: ${{ secrets.SSH_PRIVATE_KEY }}
 
       - name: Deploy Stack
         uses: ./.staxless-deploy/actions/deploy-stack
         with:
-          manager_ip: ${{ steps.infra.outputs.manager_ip }}
-          compose_file: ${{ steps.config.outputs.compose_file }}
-          stack_name: ${{ steps.config.outputs.stack_name }}
+          manager_ip: ${{ needs.provision.outputs.manager_ip }}
+          compose_file: ${{ needs.provision.outputs.compose_file }}
+          stack_name: ${{ needs.provision.outputs.stack_name }}
 
       - name: Health Check
         uses: ./.staxless-deploy/actions/health-check
         with:
-          manager_ip: ${{ steps.infra.outputs.manager_ip }}
-          stack_name: ${{ steps.config.outputs.stack_name }}
+          manager_ip: ${{ needs.provision.outputs.manager_ip }}
+          stack_name: ${{ needs.provision.outputs.stack_name }}
+
+  # ── Cleanup: always remove SSH access ─────────────────────────
+  cleanup:
+    name: Cleanup SSH
+    needs: [provision, deploy]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout staxless-deploy
+        uses: actions/checkout@v4
+        with:
+          repository: staxless/staxless-deploy
+          path: .staxless-deploy
+
+      - name: Remove SSH Whitelist
+        uses: ./.staxless-deploy/actions/remove-ssh
+        with:
+          do_token: ${{ secrets.DIGITALOCEAN_TOKEN }}
+          stack_name: ${{ needs.provision.outputs.stack_name }}

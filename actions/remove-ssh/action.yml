@@ -1,0 +1,64 @@
+name: Remove SSH
+description: Remove SSH access from the DigitalOcean firewall
+
+inputs:
+  do_token:
+    description: DigitalOcean API token
+    required: true
+  stack_name:
+    description: Stack name to locate the firewall
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Close SSH access
+      timeout-minutes: 10
+      shell: bash
+      env:
+        DO_TOKEN: ${{ inputs.do_token }}
+      run: |
+        set -euo pipefail
+
+        if [ -z "$DO_TOKEN" ]; then
+          echo "::warning::No DigitalOcean token provided, skipping SSH removal"
+          exit 0
+        fi
+
+        STACK="${{ inputs.stack_name }}"
+        API="https://api.digitalocean.com/v2"
+        AUTH="Authorization: Bearer $DO_TOKEN"
+
+        # Get firewall ID by name
+        FIREWALLS=$(curl -sf "$API/firewalls?per_page=200" -H "$AUTH")
+        FW_ID=$(echo "$FIREWALLS" | jq -r --arg name "${STACK}-firewall" '.firewalls[] | select(.name == $name) | .id')
+
+        if [ -z "$FW_ID" ]; then
+          echo "::warning::Firewall ${STACK}-firewall not found, skipping SSH cleanup"
+          exit 0
+        fi
+        echo "Firewall ID: $FW_ID"
+
+        # Get current firewall config
+        CURRENT=$(curl -sf "$API/firewalls/$FW_ID" -H "$AUTH")
+        DROPLET_IDS=$(echo "$CURRENT" | jq '.firewall.droplet_ids')
+        CURRENT_INBOUND=$(echo "$CURRENT" | jq '.firewall.inbound_rules')
+        CURRENT_OUTBOUND=$(echo "$CURRENT" | jq '.firewall.outbound_rules')
+
+        # Remove SSH rule (port 22)
+        NEW_INBOUND=$(echo "$CURRENT_INBOUND" | jq '[.[] | select(.ports != "22")]')
+
+        # Update firewall
+        PAYLOAD=$(jq -n \
+          --arg name "${STACK}-firewall" \
+          --argjson droplet_ids "$DROPLET_IDS" \
+          --argjson inbound "$NEW_INBOUND" \
+          --argjson outbound "$CURRENT_OUTBOUND" \
+          '{name: $name, droplet_ids: $droplet_ids, inbound_rules: $inbound, outbound_rules: $outbound}')
+
+        curl -sf -X PUT "$API/firewalls/$FW_ID" \
+          -H "$AUTH" \
+          -H "Content-Type: application/json" \
+          -d "$PAYLOAD" > /dev/null
+
+        echo "SSH access removed from firewall"

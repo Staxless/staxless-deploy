@@ -75,6 +75,12 @@ jobs:
         with:
           ssh_private_key: ${{ secrets.SSH_PRIVATE_KEY }}
 
+      - name: Whitelist SSH
+        uses: ./.staxless-deploy/actions/whitelist-ssh
+        with:
+          do_token: ${{ secrets.DIGITALOCEAN_TOKEN }}
+          stack_name: ${{ steps.config.outputs.stack_name }}
+
       - name: Detect service secrets
         id: detect
         run: bash .staxless-deploy/scripts/deployment/detect-service-secrets.sh "${{ inputs.service_name }}" "${{ steps.config.outputs.compose_file }}" "${{ steps.config.outputs.bake_file }}"
@@ -120,4 +126,11 @@ jobs:
         uses: ./.staxless-deploy/actions/health-check
         with:
           manager_ip: ${{ secrets.MANAGER_IP }}
+          stack_name: ${{ steps.config.outputs.stack_name }}
+
+      - name: Remove SSH Whitelist
+        if: always()
+        uses: ./.staxless-deploy/actions/remove-ssh
+        with:
+          do_token: ${{ secrets.DIGITALOCEAN_TOKEN }}
           stack_name: ${{ steps.config.outputs.stack_name }}

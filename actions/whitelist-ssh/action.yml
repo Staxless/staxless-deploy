@@ -1,0 +1,74 @@
+name: Whitelist SSH
+description: Open SSH for GitHub Actions runner IPs on the DigitalOcean firewall
+
+inputs:
+  do_token:
+    description: DigitalOcean API token
+    required: true
+  stack_name:
+    description: Stack name to locate the firewall
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Open SSH for GitHub Actions
+      timeout-minutes: 10
+      shell: bash
+      env:
+        DO_TOKEN: ${{ inputs.do_token }}
+      run: |
+        set -euo pipefail
+
+        if [ -z "$DO_TOKEN" ]; then
+          echo "::warning::No DigitalOcean token provided, skipping SSH whitelist"
+          exit 0
+        fi
+
+        STACK="${{ inputs.stack_name }}"
+        API="https://api.digitalocean.com/v2"
+        AUTH="Authorization: Bearer $DO_TOKEN"
+
+        # Get firewall ID by name
+        FIREWALLS=$(curl -sf "$API/firewalls?per_page=200" -H "$AUTH")
+        FW_ID=$(echo "$FIREWALLS" | jq -r --arg name "${STACK}-firewall" '.firewalls[] | select(.name == $name) | .id')
+
+        if [ -z "$FW_ID" ]; then
+          echo "::error::Firewall ${STACK}-firewall not found"
+          exit 1
+        fi
+        echo "Firewall ID: $FW_ID"
+
+        # Fetch GitHub Actions IPs and current firewall config in parallel
+        curl -sf https://api.github.com/meta > /tmp/gh_meta.json &
+        GH_PID=$!
+        curl -sf "$API/firewalls/$FW_ID" -H "$AUTH" > /tmp/fw_current.json &
+        FW_PID=$!
+        wait $GH_PID $FW_PID
+
+        GH_IPS=$(jq '[.actions[]]' /tmp/gh_meta.json)
+        DROPLET_IDS=$(jq '.firewall.droplet_ids' /tmp/fw_current.json)
+        CURRENT_INBOUND=$(jq '.firewall.inbound_rules' /tmp/fw_current.json)
+        CURRENT_OUTBOUND=$(jq '.firewall.outbound_rules' /tmp/fw_current.json)
+        echo "GitHub Actions IP ranges: $(echo "$GH_IPS" | jq length)"
+
+        # Remove any existing SSH rule and add new one with GitHub Actions IPs
+        NEW_INBOUND=$(echo "$CURRENT_INBOUND" | jq --argjson gh_ips "$GH_IPS" '
+          [.[] | select(.ports != "22")] +
+          [{protocol: "tcp", ports: "22", sources: {addresses: $gh_ips}}]
+        ')
+
+        # Update firewall
+        PAYLOAD=$(jq -n \
+          --arg name "${STACK}-firewall" \
+          --argjson droplet_ids "$DROPLET_IDS" \
+          --argjson inbound "$NEW_INBOUND" \
+          --argjson outbound "$CURRENT_OUTBOUND" \
+          '{name: $name, droplet_ids: $droplet_ids, inbound_rules: $inbound, outbound_rules: $outbound}')
+
+        curl -sf -X PUT "$API/firewalls/$FW_ID" \
+          -H "$AUTH" \
+          -H "Content-Type: application/json" \
+          -d "$PAYLOAD" > /dev/null
+
+        echo "SSH opened for GitHub Actions runner IPs"

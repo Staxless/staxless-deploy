@@ -78,6 +78,12 @@ jobs:
           do_token: ${{ secrets.DIGITALOCEAN_TOKEN }}
           cloud_provider: ${{ inputs.cloud_provider }}
 
+      - name: Whitelist SSH
+        uses: ./.staxless-deploy/actions/whitelist-ssh
+        with:
+          do_token: ${{ secrets.DIGITALOCEAN_TOKEN }}
+          stack_name: ${{ steps.config.outputs.stack_name }}
+
       - name: Graceful Shutdown
         uses: ./.staxless-deploy/actions/graceful-shutdown
         with:
@@ -98,6 +104,13 @@ jobs:
           region: ${{ steps.config.outputs.region }}
           state_bucket: ${{ inputs.state_bucket }}
           state_key: ${{ inputs.state_key || format('{0}/terraform.tfstate', steps.config.outputs.stack_name) }}
+
+      - name: Remove SSH Whitelist
+        if: always()
+        uses: ./.staxless-deploy/actions/remove-ssh
+        with:
+          do_token: ${{ secrets.DIGITALOCEAN_TOKEN }}
+          stack_name: ${{ steps.config.outputs.stack_name }}
 
       - name: Summary
         run: |

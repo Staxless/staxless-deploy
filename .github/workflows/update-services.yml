@@ -69,6 +69,12 @@ jobs:
           services: ${{ inputs.services }}
           bake_file: ${{ steps.config.outputs.bake_file }}
 
+      - name: Whitelist SSH
+        uses: ./.staxless-deploy/actions/whitelist-ssh
+        with:
+          do_token: ${{ secrets.DIGITALOCEAN_TOKEN }}
+          stack_name: ${{ steps.config.outputs.stack_name }}
+
       - name: Rolling Update
         uses: ./.staxless-deploy/actions/rolling-update
         with:
@@ -80,4 +86,11 @@ jobs:
         uses: ./.staxless-deploy/actions/health-check
         with:
           manager_ip: ${{ secrets.MANAGER_IP }}
+          stack_name: ${{ steps.config.outputs.stack_name }}
+
+      - name: Remove SSH Whitelist
+        if: always()
+        uses: ./.staxless-deploy/actions/remove-ssh
+        with:
+          do_token: ${{ secrets.DIGITALOCEAN_TOKEN }}
           stack_name: ${{ steps.config.outputs.stack_name }}
