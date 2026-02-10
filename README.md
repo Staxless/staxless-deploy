@@ -27,50 +27,79 @@ Reusable GitHub Actions workflows for deploying Staxless applications to Docker 
 
 ## Quick Start
 
-Add this to your repo as `.github/workflows/deploy.yml`:
+Add these to your repo under `.github/workflows/`:
+
+**deploy.yml** — Update services (auto-triggers on push):
 
 ```yaml
 name: Deploy
 on:
+  push:
+    branches: [main]
   workflow_dispatch:
     inputs:
-      action:
-        type: choice
-        options: [update-services, initial-deploy, add-service, destroy]
       services:
+        description: Services to update (comma-separated or "all")
         type: string
         default: 'all'
-      service_name:
-        type: string
-        default: ''
-      confirm_destroy:
-        type: string
-        default: ''
 
 jobs:
   update:
-    if: inputs.action == 'update-services'
     uses: staxless/staxless-deploy/.github/workflows/update-services.yml@v1
     with:
-      services: ${{ inputs.services }}
+      services: ${{ inputs.services || 'all' }}
     secrets: inherit
+```
 
-  initial:
-    if: inputs.action == 'initial-deploy'
+**initial-deploy.yml** — First-time infrastructure + deploy:
+
+```yaml
+name: Initial Deploy
+on:
+  workflow_dispatch:
+
+jobs:
+  deploy:
     uses: staxless/staxless-deploy/.github/workflows/initial-deploy.yml@v1
     with:
-      domain: yourdomain.com
+      domain: ${{ vars.DOMAIN }}
     secrets: inherit
+```
 
+**add-service.yml** — Add a new service:
+
+```yaml
+name: Add Service
+on:
+  workflow_dispatch:
+    inputs:
+      service_name:
+        description: Name of the service to add
+        type: string
+        required: true
+
+jobs:
   add:
-    if: inputs.action == 'add-service'
     uses: staxless/staxless-deploy/.github/workflows/add-service.yml@v1
     with:
       service_name: ${{ inputs.service_name }}
     secrets: inherit
+```
 
+**destroy.yml** — Tear down infrastructure:
+
+```yaml
+name: Destroy
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_destroy:
+        description: Type "DESTROY" to confirm
+        type: string
+        required: true
+
+jobs:
   destroy:
-    if: inputs.action == 'destroy'
     uses: staxless/staxless-deploy/.github/workflows/destroy.yml@v1
     with:
       confirm: ${{ inputs.confirm_destroy }}
@@ -170,7 +199,11 @@ Consumer Repo                    staxless-deploy
 │   └── dockerfiles/             ├── scripts/              (Shell scripts)
 ├── microservices/               └── defaults/             (Default configs)
 ├── .staxless.yml
-└── .github/workflows/deploy.yml
+└── .github/workflows/
+    ├── deploy.yml              # Auto-triggers on push
+    ├── initial-deploy.yml      # Manual: first-time setup
+    ├── add-service.yml         # Manual: add a service
+    └── destroy.yml             # Manual: tear down
 ```
 
 ---

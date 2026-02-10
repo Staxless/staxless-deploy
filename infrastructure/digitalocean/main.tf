@@ -65,66 +65,87 @@ resource "digitalocean_firewall" "main" {
     digitalocean_droplet.workers[*].id
   )
 
-  # SSH
-  inbound_rule {
-    protocol         = "tcp"
-    port_range       = "22"
-    source_addresses = var.authorized_ssh_ips
-  }
+  # SSH — no permanent rule; whitelist-ssh/remove-ssh manage access dynamically
 
-  # HTTP
+  # HTTP — Cloudflare only (Cloudflare terminates TLS, connects on port 80)
   inbound_rule {
     protocol         = "tcp"
     port_range       = "80"
-    source_addresses = ["0.0.0.0/0", "::/0"]
-  }
-
-  # HTTPS
-  inbound_rule {
-    protocol         = "tcp"
-    port_range       = "443"
-    source_addresses = ["0.0.0.0/0", "::/0"]
+    source_addresses = var.cloudflare_ipv4
   }
 
   # Docker Swarm management
   inbound_rule {
-    protocol    = "tcp"
-    port_range  = "2377"
-    source_tags = [var.stack_name]
+    protocol         = "tcp"
+    port_range       = "2377"
+    source_addresses = [digitalocean_vpc.main.ip_range]
   }
 
   # Docker Swarm node communication (TCP)
   inbound_rule {
-    protocol    = "tcp"
-    port_range  = "7946"
-    source_tags = [var.stack_name]
+    protocol         = "tcp"
+    port_range       = "7946"
+    source_addresses = [digitalocean_vpc.main.ip_range]
   }
 
   # Docker Swarm node communication (UDP)
   inbound_rule {
-    protocol    = "udp"
-    port_range  = "7946"
-    source_tags = [var.stack_name]
+    protocol         = "udp"
+    port_range       = "7946"
+    source_addresses = [digitalocean_vpc.main.ip_range]
   }
 
   # Docker Swarm overlay network
   inbound_rule {
-    protocol    = "udp"
-    port_range  = "4789"
-    source_tags = [var.stack_name]
+    protocol         = "udp"
+    port_range       = "4789"
+    source_addresses = [digitalocean_vpc.main.ip_range]
   }
 
-  # Outbound: all TCP
+  # Outbound: VPC internal (swarm inter-node, all ports)
   outbound_rule {
     protocol              = "tcp"
     port_range            = "1-65535"
-    destination_addresses = ["0.0.0.0/0", "::/0"]
+    destination_addresses = [digitalocean_vpc.main.ip_range]
   }
 
-  # Outbound: all UDP
   outbound_rule {
     protocol              = "udp"
     port_range            = "1-65535"
+    destination_addresses = [digitalocean_vpc.main.ip_range]
+  }
+
+  # Outbound: HTTPS (Docker registry, MongoDB Atlas, Stripe, Mailgun, etc.)
+  outbound_rule {
+    protocol              = "tcp"
+    port_range            = "443"
+    destination_addresses = ["0.0.0.0/0", "::/0"]
+  }
+
+  # Outbound: HTTP
+  outbound_rule {
+    protocol              = "tcp"
+    port_range            = "80"
+    destination_addresses = ["0.0.0.0/0", "::/0"]
+  }
+
+  # Outbound: DNS
+  outbound_rule {
+    protocol              = "tcp"
+    port_range            = "53"
+    destination_addresses = ["0.0.0.0/0", "::/0"]
+  }
+
+  outbound_rule {
+    protocol              = "udp"
+    port_range            = "53"
+    destination_addresses = ["0.0.0.0/0", "::/0"]
+  }
+
+  # Outbound: NTP
+  outbound_rule {
+    protocol              = "udp"
+    port_range            = "123"
     destination_addresses = ["0.0.0.0/0", "::/0"]
   }
 
