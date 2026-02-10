@@ -1,5 +1,5 @@
 name: Whitelist SSH
-description: Open SSH for GitHub Actions runner IPs on the DigitalOcean firewall
+description: Open SSH for the current GitHub Actions runner IP on the DigitalOcean firewall
 
 inputs:
   do_token:
@@ -12,7 +12,7 @@ inputs:
 runs:
   using: composite
   steps:
-    - name: Open SSH for GitHub Actions
+    - name: Open SSH for runner IP
       timeout-minutes: 10
       shell: bash
       env:
@@ -39,36 +39,7 @@ runs:
         fi
         echo "Firewall ID: $FW_ID"
 
-        # Fetch GitHub Actions IPs and current firewall config in parallel
-        curl -sf https://api.github.com/meta > /tmp/gh_meta.json &
-        GH_PID=$!
-        curl -sf "$API/firewalls/$FW_ID" -H "$AUTH" > /tmp/fw_current.json &
-        FW_PID=$!
-        wait $GH_PID $FW_PID
+        # Get runner IP and current firewall config in parallel
+        curl -sf https://api.ipify.org > /tmp/runner_ip.txt &
+        IP​​​​​​​​​​​​​​​​
 
-        GH_IPS=$(jq '[.actions[]]' /tmp/gh_meta.json)
-        DROPLET_IDS=$(jq '.firewall.droplet_ids' /tmp/fw_current.json)
-        CURRENT_INBOUND=$(jq '.firewall.inbound_rules' /tmp/fw_current.json)
-        CURRENT_OUTBOUND=$(jq '.firewall.outbound_rules' /tmp/fw_current.json)
-        echo "GitHub Actions IP ranges: $(echo "$GH_IPS" | jq length)"
-
-        # Remove any existing SSH rule and add new one with GitHub Actions IPs
-        NEW_INBOUND=$(echo "$CURRENT_INBOUND" | jq --argjson gh_ips "$GH_IPS" '
-          [.[] | select(.ports != "22")] +
-          [{protocol: "tcp", ports: "22", sources: {addresses: $gh_ips}}]
-        ')
-
-        # Update firewall
-        PAYLOAD=$(jq -n \
-          --arg name "${STACK}-firewall" \
-          --argjson droplet_ids "$DROPLET_IDS" \
-          --argjson inbound "$NEW_INBOUND" \
-          --argjson outbound "$CURRENT_OUTBOUND" \
-          '{name: $name, droplet_ids: $droplet_ids, inbound_rules: $inbound, outbound_rules: $outbound}')
-
-        curl -sf -X PUT "$API/firewalls/$FW_ID" \
-          -H "$AUTH" \
-          -H "Content-Type: application/json" \
-          -d "$PAYLOAD" > /dev/null
-
-        echo "SSH opened for GitHub Actions runner IPs"
