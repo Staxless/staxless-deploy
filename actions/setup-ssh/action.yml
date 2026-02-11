@@ -16,19 +16,23 @@ runs:
       run: |
         mkdir -p ~/.ssh
 
-        # Write key, converting literal \n to real newlines if needed
-        echo "$SSH_KEY" | sed 's/\\n/\n/g' > ~/.ssh/id_rsa
-        # Strip carriage returns and trailing whitespace
-        sed -i 's/\r$//' ~/.ssh/id_rsa
-        sed -i 's/[[:space:]]*$//' ~/.ssh/id_rsa
-        # Ensure file ends with a newline
-        sed -i -e '$a\' ~/.ssh/id_rsa
-        chmod 600 ~/.ssh/id_rsa
+        # Write key using Python to reliably handle newline formats
+        python3 << 'PYEOF'
+        import os
+        key = os.environ['SSH_KEY']
+        # If key is a single line, convert literal \n to real newlines
+        if '\n' not in key:
+            key = key.replace('\\n', '\n')
+        key = key.strip() + '\n'
+        with open(os.path.expanduser('~/.ssh/id_rsa'), 'w') as f:
+            f.write(key)
+        lines = key.strip().split('\n')
+        print(f"Key file lines: {len(lines)}")
+        print(f"First line: {lines[0]}")
+        print(f"Last line: {lines[-1]}")
+        PYEOF
 
-        # Debug info (safe — no key content exposed)
-        echo "Key file lines: $(wc -l < ~/.ssh/id_rsa)"
-        echo "First line: $(head -1 ~/.ssh/id_rsa)"
-        echo "Last line: $(tail -1 ~/.ssh/id_rsa)"
+        chmod 600 ~/.ssh/id_rsa
 
         # Validate key
         ssh-keygen -y -f ~/.ssh/id_rsa > /dev/null 2>/tmp/ssh_key_err.txt || {
