@@ -16,9 +16,9 @@ runs:
       run: |
         mkdir -p ~/.ssh
 
-        # Write key and fix common formatting issues
-        echo "$SSH_KEY" > ~/.ssh/id_rsa
-        # Strip Windows carriage returns and trailing whitespace
+        # Write key, converting literal \n to real newlines if needed
+        echo "$SSH_KEY" | sed 's/\\n/\n/g' > ~/.ssh/id_rsa
+        # Strip carriage returns and trailing whitespace
         sed -i 's/\r$//' ~/.ssh/id_rsa
         sed -i 's/[[:space:]]*$//' ~/.ssh/id_rsa
         # Ensure file ends with a newline
@@ -26,7 +26,6 @@ runs:
         chmod 600 ~/.ssh/id_rsa
 
         # Debug info (safe — no key content exposed)
-        echo "Key file size: $(wc -c < ~/.ssh/id_rsa) bytes"
         echo "Key file lines: $(wc -l < ~/.ssh/id_rsa)"
         echo "First line: $(head -1 ~/.ssh/id_rsa)"
         echo "Last line: $(tail -1 ~/.ssh/id_rsa)"
