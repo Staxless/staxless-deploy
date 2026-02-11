@@ -17,15 +17,22 @@ runs:
       run: |
         echo "Waiting for manager node to be ready..."
         for i in $(seq 1 60); do
-          if ssh -o ConnectTimeout=5 root@${{ inputs.manager_ip }} "echo ready" 2>/dev/null; then
+          if ssh -o ConnectTimeout=5 root@${{ inputs.manager_ip }} "echo ready" 2>/tmp/ssh_err.txt; then
             echo "Manager ready"
             break
           fi
           if [ "$i" -eq 60 ]; then
             echo "Manager not ready after 60 attempts"
+            echo "Last SSH error:"
+            cat /tmp/ssh_err.txt
             exit 1
           fi
-          echo "Attempt $i/60..."
+          # Show SSH error every 10 attempts for debugging
+          if [ $((i % 10)) -eq 0 ]; then
+            echo "Attempt $i/60 — SSH error: $(cat /tmp/ssh_err.txt)"
+          else
+            echo "Attempt $i/60..."
+          fi
           sleep 10
         done
 
@@ -52,12 +59,17 @@ runs:
         for WORKER_IP in "${WORKERS[@]}"; do
           echo "Joining worker: $WORKER_IP"
           for i in $(seq 1 60); do
-            if ssh -o ConnectTimeout=5 root@$WORKER_IP "echo ready" 2>/dev/null; then
+            if ssh -o ConnectTimeout=5 root@$WORKER_IP "echo ready" 2>/tmp/ssh_err.txt; then
               break
             fi
             if [ "$i" -eq 60 ]; then
               echo "Worker $WORKER_IP not ready after 60 attempts"
+              echo "Last SSH error:"
+              cat /tmp/ssh_err.txt
               exit 1
+            fi
+            if [ $((i % 10)) -eq 0 ]; then
+              echo "Attempt $i/60 — SSH error: $(cat /tmp/ssh_err.txt)"
             fi
             sleep 10
           done

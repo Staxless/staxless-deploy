@@ -71,4 +71,24 @@ runs:
           -H "Content-Type: application/json" \
           -d "$PAYLOAD" > /dev/null
 
+        # Verify the rule was applied
+        for i in $(seq 1 10); do
+          VERIFY=$(curl -sf "$API/firewalls/$FW_ID" -H "$AUTH")
+          if echo "$VERIFY" | jq -e --arg ip "$RUNNER_IP/32" \
+            '.firewall.inbound_rules[] | select(.ports == "22") | .sources.addresses[] | select(. == $ip)' > /dev/null 2>&1; then
+            echo "SSH rule verified in firewall"
+            break
+          fi
+          if [ "$i" -eq 10 ]; then
+            echo "::error::SSH rule not found in firewall after 10 verification attempts"
+            exit 1
+          fi
+          echo "Waiting for firewall rule to propagate (attempt $i/10)..."
+          sleep 3
+        done
+
+        # Brief delay for network-level propagation
+        echo "Waiting for firewall propagation..."
+        sleep 10
+
         echo "SSH opened for runner IP: $RUNNER_IP"
