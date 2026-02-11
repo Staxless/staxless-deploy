@@ -13,7 +13,6 @@ runs:
   using: composite
   steps:
     - name: Open SSH for runner IP
-      timeout-minutes: 10
       shell: bash
       env:
         DO_TOKEN: ${{ inputs.do_token }}
