@@ -16,13 +16,29 @@ runs:
       run: |
         mkdir -p ~/.ssh
 
-        # Write key using Python to reliably handle newline formats
+        # Write key using Python to reliably handle all newline formats
         python3 << 'PYEOF'
-        import os
+        import os, re
         key = os.environ['SSH_KEY']
-        # If key is a single line, convert literal \n to real newlines
+
+        # 1) Convert literal \n sequences to real newlines
         if '\n' not in key:
             key = key.replace('\\n', '\n')
+
+        # 2) If still single-line, reconstruct PEM format from concatenated key
+        if key.count('\n') <= 1:
+            key = key.strip()
+            m = re.match(r'(-----BEGIN [A-Z ]+-----)(.*)(-----END [A-Z ]+-----)', key)
+            if m:
+                header, body, footer = m.groups()
+                body = body.strip()
+                lines = [header]
+                for i in range(0, len(body), 70):
+                    lines.append(body[i:i+70])
+                lines.append(footer)
+                key = '\n'.join(lines)
+                print("Reconstructed PEM format from single-line key")
+
         key = key.strip() + '\n'
         with open(os.path.expanduser('~/.ssh/id_rsa'), 'w') as f:
             f.write(key)
