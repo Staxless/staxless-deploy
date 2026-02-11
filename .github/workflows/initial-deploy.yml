@@ -262,6 +262,12 @@ jobs:
         with:
           ssh_private_key: ${{ secrets.SSH_PRIVATE_KEY }}
 
+      - name: Whitelist SSH
+        uses: ./.staxless-deploy/actions/whitelist-ssh
+        with:
+          do_token: ${{ secrets.DIGITALOCEAN_TOKEN }}
+          stack_name: ${{ needs.provision.outputs.stack_name }}
+
       - name: Deploy Stack
         uses: ./.staxless-deploy/actions/deploy-stack
         with:

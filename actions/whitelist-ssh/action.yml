@@ -41,5 +41,34 @@ runs:
 
         # Get runner IP and current firewall config in parallel
         curl -sf https://api.ipify.org > /tmp/runner_ip.txt &
-        IP​​​​​​​​​​​​​​​​
+        IP_PID=$!
+        curl -sf "$API/firewalls/$FW_ID" -H "$AUTH" > /tmp/fw_current.json &
+        FW_PID=$!
+        wait $IP_PID $FW_PID
 
+        RUNNER_IP=$(cat /tmp/runner_ip.txt)
+        DROPLET_IDS=$(jq '.firewall.droplet_ids' /tmp/fw_current.json)
+        CURRENT_INBOUND=$(jq '.firewall.inbound_rules' /tmp/fw_current.json)
+        CURRENT_OUTBOUND=$(jq '.firewall.outbound_rules' /tmp/fw_current.json)
+        echo "Runner IP: $RUNNER_IP"
+
+        # Remove any existing SSH rule and add new one with runner IP
+        NEW_INBOUND=$(echo "$CURRENT_INBOUND" | jq --arg runner_ip "$RUNNER_IP" '
+          [.[] | select(.ports != "22")] +
+          [{protocol: "tcp", ports: "22", sources: {addresses: [$runner_ip + "/32"]}}]
+        ')
+
+        # Update firewall
+        PAYLOAD=$(jq -n \
+          --arg name "${STACK}-firewall" \
+          --argjson droplet_ids "$DROPLET_IDS" \
+          --argjson inbound "$NEW_INBOUND" \
+          --argjson outbound "$CURRENT_OUTBOUND" \
+          '{name: $name, droplet_ids: $droplet_ids, inbound_rules: $inbound, outbound_rules: $outbound}')
+
+        curl -sf -X PUT "$API/firewalls/$FW_ID" \
+          -H "$AUTH" \
+          -H "Content-Type: application/json" \
+          -d "$PAYLOAD" > /dev/null
+
+        echo "SSH opened for runner IP: $RUNNER_IP"
