@@ -69,5 +69,5 @@ variable "cloudflare_ipv4" {
 variable "enable_backups" {
   description = "Enable droplet backups"
   type        = bool
-  default     = true
+  default     = false
 }
