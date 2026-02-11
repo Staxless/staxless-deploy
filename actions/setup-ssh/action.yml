@@ -11,9 +11,11 @@ runs:
   steps:
     - name: Write SSH key
       shell: bash
+      env:
+        SSH_KEY: ${{ inputs.ssh_private_key }}
       run: |
         mkdir -p ~/.ssh
-        printf '%s\n' "${{ inputs.ssh_private_key }}" > ~/.ssh/id_rsa
+        echo "$SSH_KEY" > ~/.ssh/id_rsa
         chmod 600 ~/.ssh/id_rsa
         # Validate key is readable
         ssh-keygen -y -f ~/.ssh/id_rsa > /dev/null 2>&1 || {
