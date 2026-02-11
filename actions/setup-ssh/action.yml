@@ -13,8 +13,13 @@ runs:
       shell: bash
       run: |
         mkdir -p ~/.ssh
-        echo "${{ inputs.ssh_private_key }}" > ~/.ssh/id_rsa
+        printf '%s\n' "${{ inputs.ssh_private_key }}" > ~/.ssh/id_rsa
         chmod 600 ~/.ssh/id_rsa
+        # Validate key is readable
+        ssh-keygen -y -f ~/.ssh/id_rsa > /dev/null 2>&1 || {
+          echo "::error::SSH private key is invalid or malformed"
+          exit 1
+        }
 
     - name: Configure SSH
       shell: bash
