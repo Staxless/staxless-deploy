@@ -36,20 +36,29 @@ runs:
         echo "Building images for: $SERVICES"
         echo "Bake file: $BAKE_NAME (in $BAKE_DIR)"
 
-        # Label images with source repo so GHCR auto-links packages to the repo,
-        # which grants GITHUB_TOKEN write access for first-time package creation
-        SOURCE_LABEL="org.opencontainers.image.source=https://github.com/${GITHUB_REPOSITORY}"
+        # Generate override file to label images with source repo.
+        # GHCR uses this label to auto-link packages to the repo, which grants
+        # GITHUB_TOKEN write access for first-time package creation.
+        # (--set can't be used because dots in label keys are parsed as path separators)
+        SOURCE_URL="https://github.com/${GITHUB_REPOSITORY}"
+        TARGETS=$(docker buildx bake -f "$BAKE_NAME" --print 2>/dev/null | jq -r '.target | keys[]')
+        OVERRIDE=""
+        for t in $TARGETS; do
+          OVERRIDE+="target \"$t\" { labels = { \"org.opencontainers.image.source\" = \"$SOURCE_URL\" } }"$'\n'
+        done
+        echo "$OVERRIDE" > /tmp/ghcr-labels.hcl
+        echo "Adding source label ($SOURCE_URL) to targets: $(echo $TARGETS | tr '\n' ' ')"
 
         if [ "$SERVICES" = "all" ]; then
-          docker buildx bake -f "$BAKE_NAME" --allow=fs.read=.. \
-            --set "*.labels.${SOURCE_LABEL}" --push
+          docker buildx bake -f "$BAKE_NAME" -f /tmp/ghcr-labels.hcl \
+            --allow=fs.read=.. --push
         else
           IFS=',' read -ra SERVICE_LIST <<< "$SERVICES"
           for service in "${SERVICE_LIST[@]}"; do
             service=$(echo "$service" | xargs)
             echo "Building $service..."
-            docker buildx bake -f "$BAKE_NAME" --allow=fs.read=.. \
-              --set "*.labels.${SOURCE_LABEL}" --push "$service"
+            docker buildx bake -f "$BAKE_NAME" -f /tmp/ghcr-labels.hcl \
+              --allow=fs.read=.. --push "$service"
           done
         fi
 
