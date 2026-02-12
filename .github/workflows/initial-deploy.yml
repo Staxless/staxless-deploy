@@ -79,6 +79,8 @@ on:
         required: false
       CLOUDFLARE_TUNNEL_TOKEN:
         required: false
+      GHCR_TOKEN:
+        required: false
 
 jobs:
   # ── Phase 1: Provision infrastructure ──────────────────────────
@@ -187,6 +189,7 @@ jobs:
         with:
           registry_type: ${{ inputs.registry_type }}
           github_token: ${{ github.token }}
+          ghcr_token: ${{ secrets.GHCR_TOKEN }}
           github_actor: ${{ github.actor }}
           do_token: ${{ secrets.DIGITALOCEAN_TOKEN }}
 

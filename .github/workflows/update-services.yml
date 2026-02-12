@@ -26,6 +26,8 @@ on:
         required: true
       DIGITALOCEAN_TOKEN:
         required: false
+      GHCR_TOKEN:
+        required: false
 
 jobs:
   update:
@@ -63,6 +65,7 @@ jobs:
         with:
           registry_type: ${{ inputs.registry_type }}
           github_token: ${{ github.token }}
+          ghcr_token: ${{ secrets.GHCR_TOKEN }}
           github_actor: ${{ github.actor }}
           do_token: ${{ secrets.DIGITALOCEAN_TOKEN }}
 

@@ -10,6 +10,10 @@ inputs:
     description: GitHub token for GHCR authentication
     required: false
     default: ''
+  ghcr_token:
+    description: Optional GHCR PAT that overrides github_token for package creation
+    required: false
+    default: ''
   github_actor:
     description: GitHub actor for GHCR authentication
     required: false
@@ -25,7 +29,7 @@ runs:
     - name: Login to GHCR
       if: inputs.registry_type == 'ghcr'
       shell: bash
-      run: echo "${{ inputs.github_token }}" | docker login ghcr.io -u "${{ inputs.github_actor }}" --password-stdin
+      run: echo "${{ inputs.ghcr_token || inputs.github_token }}" | docker login ghcr.io -u "${{ inputs.github_actor }}" --password-stdin
 
     - name: Login to DigitalOcean Registry
       if: inputs.registry_type == 'digitalocean'
