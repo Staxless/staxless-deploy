@@ -169,6 +169,9 @@ jobs:
     needs: provision
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: write
     steps:
       - name: Checkout consumer repo
         uses: actions/checkout@v4
