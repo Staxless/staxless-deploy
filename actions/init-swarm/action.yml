@@ -15,21 +15,24 @@ runs:
     - name: Wait for manager
       shell: bash
       run: |
-        echo "Waiting for manager node to be ready..."
+        echo "Waiting for manager node (SSH + cloud-init + Docker)..."
         for i in $(seq 1 60); do
-          if ssh -o ConnectTimeout=5 root@${{ inputs.manager_ip }} "echo ready" 2>/tmp/ssh_err.txt; then
-            echo "Manager ready"
+          if ssh -o ConnectTimeout=5 root@${{ inputs.manager_ip }} \
+            "test -f /var/lib/cloud/instance/boot-finished && docker info > /dev/null 2>&1 && echo ready" 2>/tmp/ssh_err.txt | grep -q ready; then
+            echo "Manager ready (cloud-init complete, Docker running)"
             break
           fi
           if [ "$i" -eq 60 ]; then
             echo "Manager not ready after 60 attempts"
             echo "Last SSH error:"
             cat /tmp/ssh_err.txt
+            # Show cloud-init status if SSH works
+            ssh -o ConnectTimeout=5 root@${{ inputs.manager_ip }} \
+              "cloud-init status 2>/dev/null; systemctl is-active docker 2>/dev/null" || true
             exit 1
           fi
-          # Show SSH error every 10 attempts for debugging
           if [ $((i % 10)) -eq 0 ]; then
-            echo "Attempt $i/60 — SSH error: $(cat /tmp/ssh_err.txt)"
+            echo "Attempt $i/60 — $(cat /tmp/ssh_err.txt)"
           else
             echo "Attempt $i/60..."
           fi
@@ -59,7 +62,9 @@ runs:
         for WORKER_IP in "${WORKERS[@]}"; do
           echo "Joining worker: $WORKER_IP"
           for i in $(seq 1 60); do
-            if ssh -o ConnectTimeout=5 root@$WORKER_IP "echo ready" 2>/tmp/ssh_err.txt; then
+            if ssh -o ConnectTimeout=5 root@$WORKER_IP \
+              "test -f /var/lib/cloud/instance/boot-finished && docker info > /dev/null 2>&1 && echo ready" 2>/tmp/ssh_err.txt | grep -q ready; then
+              echo "Worker $WORKER_IP ready"
               break
             fi
             if [ "$i" -eq 60 ]; then
@@ -69,7 +74,7 @@ runs:
               exit 1
             fi
             if [ $((i % 10)) -eq 0 ]; then
-              echo "Attempt $i/60 — SSH error: $(cat /tmp/ssh_err.txt)"
+              echo "Attempt $i/60 — $(cat /tmp/ssh_err.txt)"
             fi
             sleep 10
           done
