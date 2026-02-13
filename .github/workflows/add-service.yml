@@ -34,9 +34,9 @@ on:
         required: false
       GOOGLE_REDIRECT_URI:
         required: false
-      GITHUB_CLIENT_ID:
+      GH_OAUTH_CLIENT_ID:
         required: false
-      GITHUB_CLIENT_SECRET:
+      GH_OAUTH_CLIENT_SECRET:
         required: false
       STRIPE_PRIVATE_KEY:
         required: false
@@ -98,8 +98,8 @@ jobs:
           GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
           GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
           GOOGLE_REDIRECT_URI: ${{ secrets.GOOGLE_REDIRECT_URI }}
-          GITHUB_CLIENT_ID: ${{ secrets.GITHUB_CLIENT_ID }}
-          GITHUB_CLIENT_SECRET: ${{ secrets.GITHUB_CLIENT_SECRET }}
+          GH_OAUTH_CLIENT_ID: ${{ secrets.GH_OAUTH_CLIENT_ID }}
+          GH_OAUTH_CLIENT_SECRET: ${{ secrets.GH_OAUTH_CLIENT_SECRET }}
           STRIPE_PRIVATE_KEY: ${{ secrets.STRIPE_PRIVATE_KEY }}
           STRIPE_WEBHOOK_SECRET: ${{ secrets.STRIPE_WEBHOOK_SECRET }}
           MAILGUN_API_KEY: ${{ secrets.MAILGUN_API_KEY }}

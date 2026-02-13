@@ -67,9 +67,9 @@ on:
         required: false
       GOOGLE_REDIRECT_URI:
         required: false
-      GITHUB_CLIENT_ID:
+      GH_OAUTH_CLIENT_ID:
         required: false
-      GITHUB_CLIENT_SECRET:
+      GH_OAUTH_CLIENT_SECRET:
         required: false
       STRIPE_PRIVATE_KEY:
         required: false
@@ -95,7 +95,6 @@ jobs:
       stack_name: ${{ steps.config.outputs.stack_name }}
       compose_file: ${{ steps.config.outputs.compose_file }}
       bake_file: ${{ steps.config.outputs.bake_file }}
-      database_url: ${{ steps.mongodb_out.outputs.database_url }}
     steps:
       - name: Checkout consumer repo
         uses: actions/checkout@v4
@@ -147,18 +146,30 @@ jobs:
           state_bucket: ${{ inputs.state_bucket }}
           state_key: ${{ inputs.state_key || format('{0}/terraform.tfstate', steps.config.outputs.stack_name) }}
 
+  # ── Phase 1b: Setup MongoDB Atlas (parallel with provision) ───
+  setup-mongodb:
+    name: Setup MongoDB Atlas
+    if: inputs.mongodb_setup
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    outputs:
+      database_url: ${{ steps.mongodb_out.outputs.database_url }}
+    steps:
+      - name: Checkout staxless-deploy
+        uses: actions/checkout@v4
+        with:
+          repository: staxless/staxless-deploy
+          path: .staxless-deploy
+
       - name: Setup MongoDB Atlas
-        if: inputs.mongodb_setup
         env:
           MONGODB_ATLAS_PUBLIC_KEY: ${{ secrets.MONGODB_ATLAS_PUBLIC_KEY }}
           MONGODB_ATLAS_PRIVATE_KEY: ${{ secrets.MONGODB_ATLAS_PRIVATE_KEY }}
           MONGODB_ATLAS_PROJECT_ID: ${{ secrets.MONGODB_ATLAS_PROJECT_ID }}
-          ALL_NODE_IPS: ${{ steps.infra.outputs.all_node_ips }}
         run: bash .staxless-deploy/scripts/infrastructure/setup-mongodb-atlas.sh
 
       - name: Capture MongoDB URL
         id: mongodb_out
-        if: inputs.mongodb_setup
         run: |
           if [ -n "$DATABASE_URL" ]; then
             echo "::add-mask::$DATABASE_URL"
@@ -234,23 +245,69 @@ jobs:
           manager_ip: ${{ needs.provision.outputs.manager_ip }}
           secrets_json: |
             {
-              "DATABASE_URL": "${{ secrets.DATABASE_URL || needs.provision.outputs.database_url }}",
+              "DATABASE_URL": "${{ secrets.DATABASE_URL }}",
               "DATABASE_NAME": "${{ needs.provision.outputs.stack_name }}",
               "GOOGLE_CLIENT_ID": "${{ secrets.GOOGLE_CLIENT_ID }}",
               "GOOGLE_CLIENT_SECRET": "${{ secrets.GOOGLE_CLIENT_SECRET }}",
               "GOOGLE_REDIRECT_URI": "${{ secrets.GOOGLE_REDIRECT_URI }}",
-              "GITHUB_CLIENT_ID": "${{ secrets.GITHUB_CLIENT_ID }}",
-              "GITHUB_CLIENT_SECRET": "${{ secrets.GITHUB_CLIENT_SECRET }}",
+              "GH_OAUTH_CLIENT_ID": "${{ secrets.GH_OAUTH_CLIENT_ID }}",
+              "GH_OAUTH_CLIENT_SECRET": "${{ secrets.GH_OAUTH_CLIENT_SECRET }}",
               "STRIPE_PRIVATE_KEY": "${{ secrets.STRIPE_PRIVATE_KEY }}",
               "STRIPE_WEBHOOK_SECRET": "${{ secrets.STRIPE_WEBHOOK_SECRET }}",
               "MAILGUN_API_KEY": "${{ secrets.MAILGUN_API_KEY }}",
               "CLOUDFLARE_TUNNEL_TOKEN": "${{ secrets.CLOUDFLARE_TUNNEL_TOKEN }}"
             }
 
-  # ── Phase 3: Deploy (waits for both build + swarm) ────────────
+  # ── Phase 2b: Finalize MongoDB (whitelist IPs + create DB secret) ──
+  finalize-mongodb:
+    name: Finalize MongoDB
+    needs: [provision, setup-mongodb, setup-swarm]
+    if: inputs.mongodb_setup && !cancelled()
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout staxless-deploy
+        uses: actions/checkout@v4
+        with:
+          repository: staxless/staxless-deploy
+          path: .staxless-deploy
+
+      - name: Setup SSH
+        uses: ./.staxless-deploy/actions/setup-ssh
+        with:
+          ssh_private_key: ${{ secrets.SSH_PRIVATE_KEY }}
+
+      - name: Whitelist SSH
+        uses: ./.staxless-deploy/actions/whitelist-ssh
+        with:
+          do_token: ${{ secrets.DIGITALOCEAN_TOKEN }}
+          stack_name: ${{ needs.provision.outputs.stack_name }}
+
+      - name: Whitelist IPs in MongoDB Atlas
+        env:
+          MONGODB_ATLAS_PUBLIC_KEY: ${{ secrets.MONGODB_ATLAS_PUBLIC_KEY }}
+          MONGODB_ATLAS_PRIVATE_KEY: ${{ secrets.MONGODB_ATLAS_PRIVATE_KEY }}
+          MONGODB_ATLAS_PROJECT_ID: ${{ secrets.MONGODB_ATLAS_PROJECT_ID }}
+          ALL_NODE_IPS: ${{ needs.provision.outputs.all_node_ips }}
+        run: bash .staxless-deploy/scripts/infrastructure/whitelist-mongodb-atlas.sh
+
+      - name: Create DATABASE_URL Secret
+        run: |
+          DATABASE_URL="${{ needs.setup-mongodb.outputs.database_url }}"
+          MANAGER_IP="${{ needs.provision.outputs.manager_ip }}"
+          if [ -n "$DATABASE_URL" ]; then
+            echo "::add-mask::$DATABASE_URL"
+            echo "Creating DATABASE_URL Docker secret..."
+            printf '%s' "$DATABASE_URL" | ssh root@"$MANAGER_IP" "docker secret create DATABASE_URL - 2>/dev/null" || echo "DATABASE_URL secret already exists"
+          else
+            echo "Warning: DATABASE_URL is empty, skipping secret creation"
+          fi
+
+  # ── Phase 3: Deploy (waits for build + swarm + mongodb) ────────
   deploy:
     name: Deploy Stack
-    needs: [provision, build-images, setup-swarm]
+    needs: [provision, build-images, setup-swarm, finalize-mongodb]
+    if: ${{ !cancelled() && needs.provision.result == 'success' && needs.build-images.result == 'success' && needs.setup-swarm.result == 'success' && (needs.finalize-mongodb.result == 'success' || needs.finalize-mongodb.result == 'skipped') }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -290,7 +347,7 @@ jobs:
   # ── Cleanup: always remove SSH access ─────────────────────────
   cleanup:
     name: Cleanup SSH
-    needs: [provision, deploy]
+    needs: [provision, deploy, finalize-mongodb]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
