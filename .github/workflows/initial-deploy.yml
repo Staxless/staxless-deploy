@@ -304,10 +304,19 @@ jobs:
   finalize-mongodb:
     name: Finalize MongoDB
     needs: [provision, setup-mongodb, setup-swarm]
-    if: inputs.mongodb_setup && !cancelled()
+    if: inputs.mongodb_setup && needs.setup-mongodb.result == 'success' && !cancelled()
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
+      - name: Validate MongoDB output
+        run: |
+          DATABASE_URL="${{ needs.setup-mongodb.outputs.database_url }}"
+          if [ -z "$DATABASE_URL" ]; then
+            echo "::error::DATABASE_URL is empty — setup-mongodb did not produce a connection string"
+            exit 1
+          fi
+          echo "DATABASE_URL received from setup-mongodb"
+
       - name: Checkout staxless-deploy
         uses: actions/checkout@v4
         with:
@@ -351,9 +360,7 @@ jobs:
             printf '%s' "$value" | ssh root@"$MANAGER_IP" "docker secret create $name -"
           }
 
-          if [ -n "$DATABASE_URL" ]; then
-            echo "::add-mask::$DATABASE_URL"
-          fi
+          echo "::add-mask::$DATABASE_URL"
 
           upsert_secret "DATABASE_URL" "$DATABASE_URL"
           upsert_secret "DATABASE_NAME" "$DATABASE_NAME"

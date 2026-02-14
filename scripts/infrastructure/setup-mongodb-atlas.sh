@@ -11,6 +11,9 @@ for var in MONGODB_ATLAS_PROJECT_ID MONGODB_ATLAS_PUBLIC_KEY MONGODB_ATLAS_PRIVA
   fi
 done
 
+CLUSTER_NAME="${CLUSTER_NAME:-staxless-production}"
+DB_USERNAME="${DB_USERNAME:-staxless-app}"
+
 API_BASE="https://cloud.mongodb.com/api/atlas/v2"
 PROJECT_ID="$MONGODB_ATLAS_PROJECT_ID"
 
@@ -46,27 +49,28 @@ atlas_api() {
 DB_PASSWORD=$(openssl rand -base64 32 | tr -d "=+/" | cut -c1-25)
 
 # Create cluster (skip if it already exists)
-echo "Creating M10 cluster..."
-if atlas_api GET "$API_BASE/groups/$PROJECT_ID/clusters/staxless-production" &>/dev/null; then
+echo "Checking for existing cluster: $CLUSTER_NAME..."
+if atlas_api GET "$API_BASE/groups/$PROJECT_ID/clusters/$CLUSTER_NAME" &>/dev/null; then
   echo "Cluster already exists, skipping creation"
 else
-  atlas_api POST "$API_BASE/groups/$PROJECT_ID/clusters" '{
-    "name": "staxless-production",
-    "clusterType": "REPLICASET",
-    "replicationSpecs": [{
-      "regionConfigs": [{
-        "providerName": "AWS",
-        "regionName": "US_EAST_1",
-        "priority": 7,
-        "electableSpecs": { "instanceSize": "M10", "nodeCount": 3 }
+  echo "Creating M10 cluster: $CLUSTER_NAME..."
+  atlas_api POST "$API_BASE/groups/$PROJECT_ID/clusters" "{
+    \"name\": \"$CLUSTER_NAME\",
+    \"clusterType\": \"REPLICASET\",
+    \"replicationSpecs\": [{
+      \"regionConfigs\": [{
+        \"providerName\": \"AWS\",
+        \"regionName\": \"US_EAST_1\",
+        \"priority\": 7,
+        \"electableSpecs\": { \"instanceSize\": \"M10\", \"nodeCount\": 3 }
       }]
     }]
-  }'
+  }"
 fi
 
-echo "Waiting for cluster to be ready (7-10 minutes)..."
+echo "Waiting for cluster to be ready..."
 for i in $(seq 1 60); do
-  RESPONSE=$(atlas_api GET "$API_BASE/groups/$PROJECT_ID/clusters/staxless-production")
+  RESPONSE=$(atlas_api GET "$API_BASE/groups/$PROJECT_ID/clusters/$CLUSTER_NAME")
   STATE=$(echo "$RESPONSE" | jq -r '.stateName')
 
   if [ "$STATE" = "IDLE" ]; then
@@ -83,26 +87,38 @@ if [ "$STATE" != "IDLE" ]; then
   exit 1
 fi
 
-# Create database user
-echo "Creating database user..."
-atlas_api POST "$API_BASE/groups/$PROJECT_ID/databaseUsers" "{
-  \"databaseName\": \"admin\",
-  \"username\": \"staxless-app\",
-  \"password\": \"$DB_PASSWORD\",
-  \"roles\": [
-    {\"databaseName\": \"auth\", \"roleName\": \"readWrite\"},
-    {\"databaseName\": \"users\", \"roleName\": \"readWrite\"},
-    {\"databaseName\": \"stripe\", \"roleName\": \"readWrite\"}
-  ]
-}" || echo "User may already exist, continuing..."
+# Create or update database user
+# Check if user already exists — if so, update password; otherwise create
+echo "Checking for existing database user: $DB_USERNAME..."
+if atlas_api GET "$API_BASE/groups/$PROJECT_ID/databaseUsers/admin/$DB_USERNAME" &>/dev/null; then
+  echo "User exists, updating password..."
+  atlas_api PATCH "$API_BASE/groups/$PROJECT_ID/databaseUsers/admin/$DB_USERNAME" "{
+    \"password\": \"$DB_PASSWORD\"
+  }"
+else
+  echo "Creating database user: $DB_USERNAME..."
+  atlas_api POST "$API_BASE/groups/$PROJECT_ID/databaseUsers" "{
+    \"databaseName\": \"admin\",
+    \"username\": \"$DB_USERNAME\",
+    \"password\": \"$DB_PASSWORD\",
+    \"roles\": [
+      {\"databaseName\": \"admin\", \"roleName\": \"readWriteAnyDatabase\"}
+    ]
+  }"
+fi
 
 # Get connection string
-CLUSTER_INFO=$(atlas_api GET "$API_BASE/groups/$PROJECT_ID/clusters/staxless-production")
+CLUSTER_INFO=$(atlas_api GET "$API_BASE/groups/$PROJECT_ID/clusters/$CLUSTER_NAME")
 CLUSTER_HOSTNAME=$(echo "$CLUSTER_INFO" | jq -r '.srvAddress' | sed 's|mongodb+srv://||')
 
-DATABASE_URL="mongodb+srv://staxless-app:${DB_PASSWORD}@${CLUSTER_HOSTNAME}"
+if [ -z "$CLUSTER_HOSTNAME" ] || [ "$CLUSTER_HOSTNAME" = "null" ]; then
+  echo "Error: Could not get cluster connection string"
+  exit 1
+fi
+
+DATABASE_URL="mongodb+srv://${DB_USERNAME}:${DB_PASSWORD}@${CLUSTER_HOSTNAME}"
 
 echo "DATABASE_URL=$DATABASE_URL" >> "$GITHUB_ENV"
-echo "DATABASE_NAME=staxless" >> "$GITHUB_ENV"
+echo "DATABASE_NAME=${DATABASE_NAME:-staxless}" >> "$GITHUB_ENV"
 
 echo "MongoDB Atlas setup complete"
