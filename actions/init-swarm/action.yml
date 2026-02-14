@@ -43,8 +43,13 @@ runs:
       shell: bash
       run: |
         PRIVATE_IP=$(ssh root@${{ inputs.manager_ip }} "ip addr show eth1 | grep 'inet ' | awk '{print \$2}' | cut -d/ -f1")
-        ssh root@${{ inputs.manager_ip }} "docker swarm init --advertise-addr $PRIVATE_IP"
-        echo "Swarm initialized with advertise addr: $PRIVATE_IP"
+        SWARM_STATE=$(ssh root@${{ inputs.manager_ip }} "docker info --format '{{.Swarm.LocalNodeState}}'" 2>/dev/null || echo "inactive")
+        if [ "$SWARM_STATE" = "active" ]; then
+          echo "Node is already part of a swarm, skipping init"
+        else
+          ssh root@${{ inputs.manager_ip }} "docker swarm init --advertise-addr $PRIVATE_IP"
+          echo "Swarm initialized with advertise addr: $PRIVATE_IP"
+        fi
 
     - name: Get worker join token
       id: token
@@ -78,8 +83,13 @@ runs:
             fi
             sleep 10
           done
-          ssh root@$WORKER_IP "docker swarm join --token ${{ steps.token.outputs.worker_token }} ${{ steps.token.outputs.manager_private_ip }}:2377"
-          echo "$WORKER_IP joined"
+          WORKER_SWARM_STATE=$(ssh root@$WORKER_IP "docker info --format '{{.Swarm.LocalNodeState}}'" 2>/dev/null || echo "inactive")
+          if [ "$WORKER_SWARM_STATE" = "active" ]; then
+            echo "$WORKER_IP is already part of a swarm, skipping join"
+          else
+            ssh root@$WORKER_IP "docker swarm join --token ${{ steps.token.outputs.worker_token }} ${{ steps.token.outputs.manager_private_ip }}:2377"
+            echo "$WORKER_IP joined"
+          fi
         done
 
     - name: Verify swarm

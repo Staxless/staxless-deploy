@@ -96,19 +96,6 @@ atlas_api POST "$API_BASE/groups/$PROJECT_ID/databaseUsers" "{
   ]
 }" || echo "User may already exist, continuing..."
 
-# Whitelist IPs (must be called AFTER infrastructure is provisioned)
-if [ -n "$ALL_NODE_IPS" ]; then
-  echo "Whitelisting droplet IPs..."
-  IFS=',' read -ra IP_LIST <<< "$ALL_NODE_IPS"
-  for IP in "${IP_LIST[@]}"; do
-    IP_CLEAN=$(echo "$IP" | tr -d '[]" ')
-    atlas_api POST "$API_BASE/groups/$PROJECT_ID/accessList" \
-      "[{\"ipAddress\": \"$IP_CLEAN\", \"comment\": \"Staxless droplet\"}]" || true
-  done
-else
-  echo "Warning: ALL_NODE_IPS not set, skipping IP whitelist"
-fi
-
 # Get connection string
 CLUSTER_INFO=$(atlas_api GET "$API_BASE/groups/$PROJECT_ID/clusters/staxless-production")
 CLUSTER_HOSTNAME=$(echo "$CLUSTER_INFO" | jq -r '.srvAddress' | sed 's|mongodb+srv://||')

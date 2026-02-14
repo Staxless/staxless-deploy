@@ -20,9 +20,14 @@ for i in $(seq 1 60); do
   sleep 10
 done
 
-# Initialize swarm — no heredoc, direct commands to avoid variable expansion bug
+# Initialize swarm — skip if already a swarm manager
 PRIVATE_IP=$(ssh root@"$MANAGER_IP" "ip addr show eth1 | grep 'inet ' | awk '{print \$2}' | cut -d/ -f1")
-ssh root@"$MANAGER_IP" "docker swarm init --advertise-addr $PRIVATE_IP"
+SWARM_STATE=$(ssh root@"$MANAGER_IP" "docker info --format '{{.Swarm.LocalNodeState}}'" 2>/dev/null || echo "inactive")
+if [ "$SWARM_STATE" = "active" ]; then
+  echo "Node is already part of a swarm, skipping init"
+else
+  ssh root@"$MANAGER_IP" "docker swarm init --advertise-addr $PRIVATE_IP"
+fi
 
 # Get token
 WORKER_TOKEN=$(ssh root@"$MANAGER_IP" "docker swarm join-token worker -q")
@@ -43,8 +48,13 @@ for WORKER_IP in "${WORKERS[@]}"; do
     sleep 10
   done
 
-  ssh root@"$WORKER_IP" "docker swarm join --token $WORKER_TOKEN $MANAGER_PRIVATE_IP:2377"
-  echo "$WORKER_IP joined"
+  WORKER_SWARM_STATE=$(ssh root@"$WORKER_IP" "docker info --format '{{.Swarm.LocalNodeState}}'" 2>/dev/null || echo "inactive")
+  if [ "$WORKER_SWARM_STATE" = "active" ]; then
+    echo "$WORKER_IP is already part of a swarm, skipping join"
+  else
+    ssh root@"$WORKER_IP" "docker swarm join --token $WORKER_TOKEN $MANAGER_PRIVATE_IP:2377"
+    echo "$WORKER_IP joined"
+  fi
 done
 
 echo "Swarm initialized"

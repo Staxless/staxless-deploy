@@ -216,6 +216,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
+      - name: Checkout consumer repo
+        uses: actions/checkout@v4
+
       - name: Checkout staxless-deploy
         uses: actions/checkout@v4
         with:
@@ -239,24 +242,63 @@ jobs:
           manager_ip: ${{ needs.provision.outputs.manager_ip }}
           worker_ips: ${{ needs.provision.outputs.worker_ips }}
 
+      - name: Detect required secrets from compose
+        id: detect-secrets
+        shell: bash
+        run: |
+          COMPOSE_FILE="${{ needs.provision.outputs.compose_file }}"
+          if [ ! -f "$COMPOSE_FILE" ]; then
+            echo "Compose file not found: $COMPOSE_FILE"
+            echo "secrets_json={}" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Extract top-level secret names from the compose file
+          SECRET_NAMES=$(python3 -c "
+          import yaml, json, sys
+          with open('$COMPOSE_FILE') as f:
+              compose = yaml.safe_load(f)
+          secrets = list(compose.get('secrets', {}).keys())
+          print(json.dumps(secrets))
+          ")
+
+          echo "Detected secrets: $SECRET_NAMES"
+          echo "secret_names=$SECRET_NAMES" >> "$GITHUB_OUTPUT"
+
       - name: Create Secrets
-        uses: ./.staxless-deploy/actions/create-secrets
-        with:
-          manager_ip: ${{ needs.provision.outputs.manager_ip }}
-          secrets_json: |
-            {
-              "DATABASE_URL": "${{ secrets.DATABASE_URL }}",
-              "DATABASE_NAME": "${{ needs.provision.outputs.stack_name }}",
-              "GOOGLE_CLIENT_ID": "${{ secrets.GOOGLE_CLIENT_ID }}",
-              "GOOGLE_CLIENT_SECRET": "${{ secrets.GOOGLE_CLIENT_SECRET }}",
-              "GOOGLE_REDIRECT_URI": "${{ secrets.GOOGLE_REDIRECT_URI }}",
-              "GH_OAUTH_CLIENT_ID": "${{ secrets.GH_OAUTH_CLIENT_ID }}",
-              "GH_OAUTH_CLIENT_SECRET": "${{ secrets.GH_OAUTH_CLIENT_SECRET }}",
-              "STRIPE_PRIVATE_KEY": "${{ secrets.STRIPE_PRIVATE_KEY }}",
-              "STRIPE_WEBHOOK_SECRET": "${{ secrets.STRIPE_WEBHOOK_SECRET }}",
-              "MAILGUN_API_KEY": "${{ secrets.MAILGUN_API_KEY }}",
-              "CLOUDFLARE_TUNNEL_TOKEN": "${{ secrets.CLOUDFLARE_TUNNEL_TOKEN }}"
-            }
+        shell: bash
+        env:
+          MANAGER_IP: ${{ needs.provision.outputs.manager_ip }}
+          STACK_NAME: ${{ needs.provision.outputs.stack_name }}
+          SECRET_NAMES: ${{ steps.detect-secrets.outputs.secret_names }}
+          # All available secrets as env vars for dynamic lookup
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          DATABASE_NAME: ${{ needs.provision.outputs.stack_name }}
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          GOOGLE_REDIRECT_URI: ${{ secrets.GOOGLE_REDIRECT_URI }}
+          GH_OAUTH_CLIENT_ID: ${{ secrets.GH_OAUTH_CLIENT_ID }}
+          GH_OAUTH_CLIENT_SECRET: ${{ secrets.GH_OAUTH_CLIENT_SECRET }}
+          STRIPE_PRIVATE_KEY: ${{ secrets.STRIPE_PRIVATE_KEY }}
+          STRIPE_WEBHOOK_SECRET: ${{ secrets.STRIPE_WEBHOOK_SECRET }}
+          MAILGUN_API_KEY: ${{ secrets.MAILGUN_API_KEY }}
+          CLOUDFLARE_TUNNEL_TOKEN: ${{ secrets.CLOUDFLARE_TUNNEL_TOKEN }}
+        run: |
+          echo "Creating Docker secrets..."
+
+          # Parse the detected secret names and create only those
+          echo "$SECRET_NAMES" | jq -r '.[]' | while read -r SECRET_NAME; do
+            SECRET_VALUE="${!SECRET_NAME}"
+            if [ -n "$SECRET_VALUE" ]; then
+              echo "Creating secret: $SECRET_NAME"
+              printf '%s' "$SECRET_VALUE" | ssh root@"$MANAGER_IP" "docker secret create $SECRET_NAME - 2>/dev/null" || echo "$SECRET_NAME already exists"
+            else
+              echo "Skipping $SECRET_NAME (not set)"
+            fi
+          done
+
+          echo "Secrets created:"
+          ssh root@"$MANAGER_IP" "docker secret ls"
 
   # ── Phase 2b: Finalize MongoDB (whitelist IPs + create DB secret) ──
   finalize-mongodb:
@@ -291,17 +333,33 @@ jobs:
           ALL_NODE_IPS: ${{ needs.provision.outputs.all_node_ips }}
         run: bash .staxless-deploy/scripts/infrastructure/whitelist-mongodb-atlas.sh
 
-      - name: Create DATABASE_URL Secret
+      - name: Create MongoDB Secrets
         run: |
           DATABASE_URL="${{ needs.setup-mongodb.outputs.database_url }}"
+          DATABASE_NAME="${{ needs.provision.outputs.stack_name }}"
           MANAGER_IP="${{ needs.provision.outputs.manager_ip }}"
+
+          upsert_secret() {
+            local name="$1" value="$2"
+            if [ -z "$value" ]; then
+              echo "Warning: $name is empty, skipping"
+              return
+            fi
+            echo "Upserting Docker secret: $name"
+            # Remove old secret if it exists (ignore error if it doesn't)
+            ssh root@"$MANAGER_IP" "docker secret rm $name 2>/dev/null" || true
+            printf '%s' "$value" | ssh root@"$MANAGER_IP" "docker secret create $name -"
+          }
+
           if [ -n "$DATABASE_URL" ]; then
             echo "::add-mask::$DATABASE_URL"
-            echo "Creating DATABASE_URL Docker secret..."
-            printf '%s' "$DATABASE_URL" | ssh root@"$MANAGER_IP" "docker secret create DATABASE_URL - 2>/dev/null" || echo "DATABASE_URL secret already exists"
-          else
-            echo "Warning: DATABASE_URL is empty, skipping secret creation"
           fi
+
+          upsert_secret "DATABASE_URL" "$DATABASE_URL"
+          upsert_secret "DATABASE_NAME" "$DATABASE_NAME"
+
+          echo "MongoDB secrets created:"
+          ssh root@"$MANAGER_IP" "docker secret ls"
 
   # ── Phase 3: Deploy (waits for build + swarm + mongodb) ────────
   deploy:
