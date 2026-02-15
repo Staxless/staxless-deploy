@@ -170,6 +170,10 @@ jobs:
         run: |
           bash .staxless-deploy/scripts/infrastructure/setup-mongodb-atlas.sh
 
+          # Script writes DATABASE_URL to GITHUB_ENV (available next step),
+          # but we need it now — read it back from the file
+          source "$GITHUB_ENV"
+
           if [ -n "$DATABASE_URL" ]; then
             echo "::add-mask::$DATABASE_URL"
             {
