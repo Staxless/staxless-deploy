@@ -123,7 +123,11 @@ fi
 CLUSTER_HOSTNAME=$(echo "$SRV_URL" | sed 's|mongodb+srv://||')
 DATABASE_URL="mongodb+srv://${DB_USERNAME}:${DB_PASSWORD}@${CLUSTER_HOSTNAME}"
 
-echo "DATABASE_URL=$DATABASE_URL" >> "$GITHUB_ENV"
-echo "DATABASE_NAME=${DATABASE_NAME:-staxless}" >> "$GITHUB_ENV"
+echo "::add-mask::$DATABASE_URL"
+{
+  echo "database_url<<MONGOEOF"
+  echo "$DATABASE_URL"
+  echo "MONGOEOF"
+} >> "$GITHUB_OUTPUT"
 
 echo "MongoDB Atlas setup complete"

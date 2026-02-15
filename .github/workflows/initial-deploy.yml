@@ -167,25 +167,7 @@ jobs:
           MONGODB_ATLAS_PUBLIC_KEY: ${{ secrets.MONGODB_ATLAS_PUBLIC_KEY }}
           MONGODB_ATLAS_PRIVATE_KEY: ${{ secrets.MONGODB_ATLAS_PRIVATE_KEY }}
           MONGODB_ATLAS_PROJECT_ID: ${{ secrets.MONGODB_ATLAS_PROJECT_ID }}
-        run: |
-          bash .staxless-deploy/scripts/infrastructure/setup-mongodb-atlas.sh
-
-          # Script writes DATABASE_URL to GITHUB_ENV (available next step),
-          # but we need it now — read it back from the file
-          source "$GITHUB_ENV"
-
-          if [ -n "$DATABASE_URL" ]; then
-            echo "::add-mask::$DATABASE_URL"
-            {
-              echo "database_url<<MONGOEOF"
-              echo "$DATABASE_URL"
-              echo "MONGOEOF"
-            } >> "$GITHUB_OUTPUT"
-            echo "DATABASE_URL output set"
-          else
-            echo "::error::setup-mongodb-atlas.sh did not set DATABASE_URL"
-            exit 1
-          fi
+        run: bash .staxless-deploy/scripts/infrastructure/setup-mongodb-atlas.sh
 
   # ── Phase 2: Build images + Setup swarm (parallel) ────────────
   build-images:
