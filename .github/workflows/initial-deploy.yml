@@ -81,6 +81,8 @@ on:
         required: false
       GHCR_TOKEN:
         required: false
+      GH_ADMIN_TOKEN:
+        required: false
 
 jobs:
   # ── Phase 1: Provision infrastructure ──────────────────────────
@@ -153,7 +155,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     outputs:
-      database_url: ${{ steps.mongodb_out.outputs.database_url }}
+      database_url: ${{ steps.capture.outputs.database_url }}
     steps:
       - name: Checkout staxless-deploy
         uses: actions/checkout@v4
@@ -162,12 +164,21 @@ jobs:
           path: .staxless-deploy
 
       - name: Setup MongoDB Atlas
-        id: mongodb_out
         env:
           MONGODB_ATLAS_PUBLIC_KEY: ${{ secrets.MONGODB_ATLAS_PUBLIC_KEY }}
           MONGODB_ATLAS_PRIVATE_KEY: ${{ secrets.MONGODB_ATLAS_PRIVATE_KEY }}
           MONGODB_ATLAS_PROJECT_ID: ${{ secrets.MONGODB_ATLAS_PROJECT_ID }}
+          GH_TOKEN: ${{ secrets.GH_ADMIN_TOKEN || github.token }}
         run: bash .staxless-deploy/scripts/infrastructure/setup-mongodb-atlas.sh
+
+      - name: Capture DATABASE_URL for current run
+        id: capture
+        run: |
+          {
+            echo "database_url<<MONGOEOF"
+            echo "$STAXLESS_DATABASE_URL"
+            echo "MONGOEOF"
+          } >> "$GITHUB_OUTPUT"
 
   # ── Phase 2: Build images + Setup swarm (parallel) ────────────
   build-images:
