@@ -109,13 +109,18 @@ fi
 
 # Get connection string
 CLUSTER_INFO=$(atlas_api GET "$API_BASE/groups/$PROJECT_ID/clusters/$CLUSTER_NAME")
-CLUSTER_HOSTNAME=$(echo "$CLUSTER_INFO" | jq -r '.srvAddress' | sed 's|mongodb+srv://||')
 
-if [ -z "$CLUSTER_HOSTNAME" ] || [ "$CLUSTER_HOSTNAME" = "null" ]; then
+# Try connectionStrings.standardSrv first (v2 API), fall back to srvAddress (older API)
+SRV_URL=$(echo "$CLUSTER_INFO" | jq -r '.connectionStrings.standardSrv // .srvAddress // empty')
+
+if [ -z "$SRV_URL" ]; then
   echo "Error: Could not get cluster connection string"
+  echo "Cluster response:"
+  echo "$CLUSTER_INFO" | jq '{connectionStrings, srvAddress}' 2>/dev/null || echo "$CLUSTER_INFO"
   exit 1
 fi
 
+CLUSTER_HOSTNAME=$(echo "$SRV_URL" | sed 's|mongodb+srv://||')
 DATABASE_URL="mongodb+srv://${DB_USERNAME}:${DB_PASSWORD}@${CLUSTER_HOSTNAME}"
 
 echo "DATABASE_URL=$DATABASE_URL" >> "$GITHUB_ENV"
