@@ -212,7 +212,7 @@ jobs:
 
   setup-swarm:
     name: Setup Swarm
-    needs: provision
+    needs: [provision, setup-cloudflare]
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -283,6 +283,7 @@ jobs:
           STRIPE_WEBHOOK_SECRET: ${{ secrets.STRIPE_WEBHOOK_SECRET }}
           MAILGUN_API_KEY: ${{ secrets.MAILGUN_API_KEY }}
           GH_PAT: ${{ secrets.GH_PAT }}
+          CLOUDFLARE_TUNNEL_TOKEN: ${{ needs.setup-cloudflare.outputs.tunnel_token }}
         run: |
           echo "Creating Docker secrets..."
 
@@ -440,17 +441,6 @@ jobs:
         run: |
           ssh root@${{ needs.provision.outputs.manager_ip }} \
             "echo '${{ secrets.GHCR_TOKEN }}' | docker login ghcr.io -u '${{ github.actor }}' --password-stdin"
-
-      - name: Create Cloudflare Docker secret
-        if: ${{ needs.setup-cloudflare.outputs.tunnel_token != '' }}
-        run: |
-          MANAGER_IP="${{ needs.provision.outputs.manager_ip }}"
-          TUNNEL_TOKEN="${{ needs.setup-cloudflare.outputs.tunnel_token }}"
-          echo "::add-mask::$TUNNEL_TOKEN"
-          echo "Creating Docker secret: CLOUDFLARE_TUNNEL_TOKEN..."
-          ssh root@"$MANAGER_IP" "docker secret rm CLOUDFLARE_TUNNEL_TOKEN 2>/dev/null" || true
-          printf '%s' "$TUNNEL_TOKEN" | ssh root@"$MANAGER_IP" "docker secret create CLOUDFLARE_TUNNEL_TOKEN -"
-          echo "Docker secret created"
 
       - name: Deploy Stack
         uses: ./.staxless-deploy/actions/deploy-stack
