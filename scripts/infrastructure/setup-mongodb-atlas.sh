@@ -137,7 +137,10 @@ echo "$DATABASE_URL" | gh secret set DATABASE_URL --repo "$GITHUB_REPOSITORY"
 echo "Setting DATABASE_NAME repo secret..."
 echo "$DATABASE_NAME" | gh secret set DATABASE_NAME --repo "$GITHUB_REPOSITORY"
 
-# Export to GITHUB_ENV so the current workflow run can use it
-echo "DATABASE_URL=$DATABASE_URL" >> "$GITHUB_ENV"
+# Write to GITHUB_OUTPUT so the calling job can pass it downstream
+if [ -n "$GITHUB_OUTPUT" ]; then
+  echo "database_url=$DATABASE_URL" >> "$GITHUB_OUTPUT"
+  echo "database_name=$DATABASE_NAME" >> "$GITHUB_OUTPUT"
+fi
 
 echo "MongoDB Atlas setup complete"

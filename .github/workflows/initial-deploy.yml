@@ -170,21 +170,9 @@ jobs:
           MONGODB_ATLAS_PRIVATE_KEY: ${{ secrets.MONGODB_ATLAS_PRIVATE_KEY }}
           MONGODB_ATLAS_PROJECT_ID: ${{ secrets.MONGODB_ATLAS_PROJECT_ID }}
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
-          DATABASE_NAME: ${{ needs.provision.outputs.stack_name || inputs.stack_name }}
+          DATABASE_NAME: ${{ inputs.stack_name }}
           GH_TOKEN: ${{ secrets.GHCR_TOKEN }}
-        run: |
-          bash .staxless-deploy/scripts/infrastructure/setup-mongodb-atlas.sh
-
-          # On first run the script writes DATABASE_URL to GITHUB_ENV
-          # Pass it as job output so finalize-mongodb can use it this run
-          if [ -n "$DATABASE_URL" ]; then
-            echo "::add-mask::$DATABASE_URL"
-            echo "database_url=$DATABASE_URL" >> "$GITHUB_OUTPUT"
-          elif [ -f "$GITHUB_ENV" ] && grep -q '^DATABASE_URL=' "$GITHUB_ENV"; then
-            DB_URL=$(grep '^DATABASE_URL=' "$GITHUB_ENV" | cut -d= -f2-)
-            echo "::add-mask::$DB_URL"
-            echo "database_url=$DB_URL" >> "$GITHUB_OUTPUT"
-          fi
+        run: bash .staxless-deploy/scripts/infrastructure/setup-mongodb-atlas.sh
 
   # ── Phase 2: Build images + Setup swarm (parallel) ────────────
   build-images:
