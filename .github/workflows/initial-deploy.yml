@@ -77,7 +77,9 @@ on:
         required: false
       MAILGUN_API_KEY:
         required: false
-      CLOUDFLARE_TUNNEL_TOKEN:
+      CLOUDFLARE_API_TOKEN:
+        required: false
+      CLOUDFLARE_ACCOUNT_ID:
         required: false
       GHCR_TOKEN:
         required: false
@@ -280,7 +282,6 @@ jobs:
           STRIPE_PRIVATE_KEY: ${{ secrets.STRIPE_PRIVATE_KEY }}
           STRIPE_WEBHOOK_SECRET: ${{ secrets.STRIPE_WEBHOOK_SECRET }}
           MAILGUN_API_KEY: ${{ secrets.MAILGUN_API_KEY }}
-          CLOUDFLARE_TUNNEL_TOKEN: ${{ secrets.CLOUDFLARE_TUNNEL_TOKEN }}
           GH_PAT: ${{ secrets.GH_PAT }}
         run: |
           echo "Creating Docker secrets..."
@@ -299,7 +300,50 @@ jobs:
           echo "Secrets created:"
           ssh root@"$MANAGER_IP" "docker secret ls"
 
-  # ── Phase 2b: Finalize MongoDB (whitelist IPs + create DB secret) ──
+  # ── Phase 2b: Setup Cloudflare Tunnel + DNS ──────────────────────
+  setup-cloudflare:
+    name: Setup Cloudflare
+    needs: provision
+    if: ${{ secrets.CLOUDFLARE_API_TOKEN != '' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      tunnel_id: ${{ steps.cloudflare.outputs.tunnel_id }}
+    steps:
+      - name: Checkout consumer repo
+        uses: actions/checkout@v4
+
+      - name: Checkout staxless-deploy
+        uses: actions/checkout@v4
+        with:
+          repository: staxless/staxless-deploy
+          path: .staxless-deploy
+
+      - name: Setup SSH
+        uses: ./.staxless-deploy/actions/setup-ssh
+        with:
+          ssh_private_key: ${{ secrets.SSH_PRIVATE_KEY }}
+
+      - name: Whitelist SSH
+        uses: ./.staxless-deploy/actions/whitelist-ssh
+        with:
+          do_token: ${{ secrets.DIGITALOCEAN_TOKEN }}
+          stack_name: ${{ needs.provision.outputs.stack_name }}
+
+      - name: Setup Cloudflare Tunnel
+        id: cloudflare
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          DOMAIN: ${{ inputs.domain }}
+          STACK_NAME: ${{ needs.provision.outputs.stack_name }}
+          MANAGER_IP: ${{ needs.provision.outputs.manager_ip }}
+          COMPOSE_FILE: ${{ needs.provision.outputs.compose_file }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GH_TOKEN: ${{ secrets.GHCR_TOKEN }}
+        run: bash .staxless-deploy/scripts/infrastructure/setup-cloudflare.sh
+
+  # ── Phase 2c: Finalize MongoDB (whitelist IPs + create DB secret) ──
   finalize-mongodb:
     name: Finalize MongoDB
     needs: [provision, setup-mongodb, setup-swarm]
@@ -367,8 +411,8 @@ jobs:
   # ── Phase 3: Deploy (waits for build + swarm + mongodb) ────────
   deploy:
     name: Deploy Stack
-    needs: [provision, build-images, setup-swarm, finalize-mongodb]
-    if: ${{ !cancelled() && needs.provision.result == 'success' && needs.build-images.result == 'success' && needs.setup-swarm.result == 'success' && (needs.finalize-mongodb.result == 'success' || needs.finalize-mongodb.result == 'skipped') }}
+    needs: [provision, build-images, setup-swarm, finalize-mongodb, setup-cloudflare]
+    if: ${{ !cancelled() && needs.provision.result == 'success' && needs.build-images.result == 'success' && needs.setup-swarm.result == 'success' && (needs.finalize-mongodb.result == 'success' || needs.finalize-mongodb.result == 'skipped') && (needs.setup-cloudflare.result == 'success' || needs.setup-cloudflare.result == 'skipped') }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
