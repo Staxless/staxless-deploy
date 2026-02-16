@@ -123,15 +123,8 @@ fi
 CLUSTER_HOSTNAME=$(echo "$SRV_URL" | sed 's|mongodb+srv://||')
 DATABASE_URL="mongodb+srv://${DB_USERNAME}:${DB_PASSWORD}@${CLUSTER_HOSTNAME}"
 
-# Store as GitHub repo secret for future runs
+# Print the URL on a known marker line so the caller can capture it
 echo "::add-mask::$DATABASE_URL"
-if [ -n "$GITHUB_REPOSITORY" ]; then
-  echo "Setting DATABASE_URL as repo secret..."
-  printf '%s' "$DATABASE_URL" | gh secret set DATABASE_URL -R "$GITHUB_REPOSITORY"
-  printf '%s' "${DATABASE_NAME:-staxless}" | gh secret set DATABASE_NAME -R "$GITHUB_REPOSITORY"
-fi
-
-# Output for current run
-echo "STAXLESS_DATABASE_URL=$DATABASE_URL" >> "$GITHUB_ENV"
+echo "STAXLESS_DB_RESULT:${DATABASE_URL}"
 
 echo "MongoDB Atlas setup complete"

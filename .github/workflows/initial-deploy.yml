@@ -162,21 +162,25 @@ jobs:
           path: .staxless-deploy
 
       - name: Setup MongoDB Atlas
+        id: capture
         env:
           MONGODB_ATLAS_PUBLIC_KEY: ${{ secrets.MONGODB_ATLAS_PUBLIC_KEY }}
           MONGODB_ATLAS_PRIVATE_KEY: ${{ secrets.MONGODB_ATLAS_PRIVATE_KEY }}
           MONGODB_ATLAS_PROJECT_ID: ${{ secrets.MONGODB_ATLAS_PROJECT_ID }}
-          GH_TOKEN: ${{ secrets.GHCR_TOKEN || github.token }}
-        run: bash .staxless-deploy/scripts/infrastructure/setup-mongodb-atlas.sh
-
-      - name: Capture DATABASE_URL for current run
-        id: capture
         run: |
-          {
-            echo "database_url<<MONGOEOF"
-            echo "$STAXLESS_DATABASE_URL"
-            echo "MONGOEOF"
-          } >> "$GITHUB_OUTPUT"
+          # Capture script output, extract DATABASE_URL from marker line
+          OUTPUT=$(bash .staxless-deploy/scripts/infrastructure/setup-mongodb-atlas.sh)
+          echo "$OUTPUT"
+
+          DATABASE_URL=$(echo "$OUTPUT" | grep '^STAXLESS_DB_RESULT:' | sed 's/^STAXLESS_DB_RESULT://')
+
+          if [ -z "$DATABASE_URL" ]; then
+            echo "::error::setup-mongodb-atlas.sh did not produce a DATABASE_URL"
+            exit 1
+          fi
+
+          echo "::add-mask::$DATABASE_URL"
+          echo "database_url=$DATABASE_URL" >> "$GITHUB_OUTPUT"
 
   # ── Phase 2: Build images + Setup swarm (parallel) ────────────
   build-images:
