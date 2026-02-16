@@ -211,7 +211,11 @@ echo "GitHub secret set"
 # ── Step 8: Write outputs ──────────────────────────────────────────
 if [ -n "$GITHUB_OUTPUT" ]; then
   echo "tunnel_id=$TUNNEL_ID" >> "$GITHUB_OUTPUT"
-  echo "tunnel_token=$TUNNEL_TOKEN" >> "$GITHUB_OUTPUT"
+  {
+    echo "tunnel_token<<TUNNEL_TOKEN_EOF"
+    printf '%s\n' "$TUNNEL_TOKEN"
+    echo "TUNNEL_TOKEN_EOF"
+  } >> "$GITHUB_OUTPUT"
 fi
 
 echo "Cloudflare setup complete"
