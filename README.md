@@ -33,7 +33,7 @@ Add these to your repo under `.github/workflows/`:
 **deploy.yml** — Rolling update services (auto-triggers on push, auto-detects changed services):
 
 ```yaml
-name: Deploy
+name: Rolling Update
 on:
   push:
     branches: [main]
