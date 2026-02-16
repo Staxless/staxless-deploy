@@ -283,9 +283,14 @@ jobs:
           STRIPE_WEBHOOK_SECRET: ${{ secrets.STRIPE_WEBHOOK_SECRET }}
           MAILGUN_API_KEY: ${{ secrets.MAILGUN_API_KEY }}
           GH_PAT: ${{ secrets.GH_PAT }}
-          CLOUDFLARE_TUNNEL_TOKEN: ${{ needs.setup-cloudflare.outputs.tunnel_token }}
         run: |
           echo "Creating Docker secrets..."
+
+          # Read Cloudflare tunnel token from manager if it was stored by setup-cloudflare
+          CF_TOKEN=$(ssh root@"$MANAGER_IP" "cat /root/.cloudflare_tunnel_token 2>/dev/null" || true)
+          if [ -n "$CF_TOKEN" ]; then
+            export CLOUDFLARE_TUNNEL_TOKEN="$CF_TOKEN"
+          fi
 
           # Parse the detected secret names and create only those
           echo "$SECRET_NAMES" | jq -r '.[]' | while read -r SECRET_NAME; do
@@ -298,6 +303,9 @@ jobs:
             fi
           done
 
+          # Clean up token file
+          ssh root@"$MANAGER_IP" "rm -f /root/.cloudflare_tunnel_token" || true
+
           echo "Secrets created:"
           ssh root@"$MANAGER_IP" "docker secret ls"
 
@@ -309,7 +317,6 @@ jobs:
     timeout-minutes: 10
     outputs:
       tunnel_id: ${{ steps.cloudflare.outputs.tunnel_id }}
-      tunnel_token: ${{ steps.cloudflare.outputs.tunnel_token }}
     steps:
       - name: Checkout consumer repo
         uses: actions/checkout@v4
