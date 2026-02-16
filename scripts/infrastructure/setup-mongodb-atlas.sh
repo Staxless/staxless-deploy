@@ -133,9 +133,9 @@ echo "::add-mask::$DATABASE_URL"
 
 # Store DATABASE_URL and DATABASE_NAME as GitHub repo secrets
 echo "Setting DATABASE_URL repo secret..."
-echo "$DATABASE_URL" | gh secret set DATABASE_URL
+echo "$DATABASE_URL" | gh secret set DATABASE_URL --repo "$GITHUB_REPOSITORY"
 echo "Setting DATABASE_NAME repo secret..."
-echo "$DATABASE_NAME" | gh secret set DATABASE_NAME
+echo "$DATABASE_NAME" | gh secret set DATABASE_NAME --repo "$GITHUB_REPOSITORY"
 
 # Export to GITHUB_ENV so the current workflow run can use it
 echo "DATABASE_URL=$DATABASE_URL" >> "$GITHUB_ENV"
