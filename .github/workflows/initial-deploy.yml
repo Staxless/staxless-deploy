@@ -308,6 +308,7 @@ jobs:
     timeout-minutes: 10
     outputs:
       tunnel_id: ${{ steps.cloudflare.outputs.tunnel_id }}
+      tunnel_token: ${{ steps.cloudflare.outputs.tunnel_token }}
     steps:
       - name: Checkout consumer repo
         uses: actions/checkout@v4
@@ -411,7 +412,7 @@ jobs:
   deploy:
     name: Deploy Stack
     needs: [provision, build-images, setup-swarm, finalize-mongodb, setup-cloudflare]
-    if: ${{ !cancelled() && needs.provision.result == 'success' && needs.build-images.result == 'success' && needs.setup-swarm.result == 'success' && (needs.finalize-mongodb.result == 'success' || needs.finalize-mongodb.result == 'skipped') && (needs.setup-cloudflare.result == 'success' || needs.setup-cloudflare.result == 'skipped') }}
+    if: ${{ !cancelled() && needs.provision.result == 'success' && needs.build-images.result == 'success' && needs.setup-swarm.result == 'success' && (needs.finalize-mongodb.result == 'success' || needs.finalize-mongodb.result == 'skipped') && needs.setup-cloudflare.result == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -439,6 +440,17 @@ jobs:
         run: |
           ssh root@${{ needs.provision.outputs.manager_ip }} \
             "echo '${{ secrets.GHCR_TOKEN }}' | docker login ghcr.io -u '${{ github.actor }}' --password-stdin"
+
+      - name: Create Cloudflare Docker secret
+        if: ${{ needs.setup-cloudflare.outputs.tunnel_token != '' }}
+        run: |
+          MANAGER_IP="${{ needs.provision.outputs.manager_ip }}"
+          TUNNEL_TOKEN="${{ needs.setup-cloudflare.outputs.tunnel_token }}"
+          echo "::add-mask::$TUNNEL_TOKEN"
+          echo "Creating Docker secret: CLOUDFLARE_TUNNEL_TOKEN..."
+          ssh root@"$MANAGER_IP" "docker secret rm CLOUDFLARE_TUNNEL_TOKEN 2>/dev/null" || true
+          printf '%s' "$TUNNEL_TOKEN" | ssh root@"$MANAGER_IP" "docker secret create CLOUDFLARE_TUNNEL_TOKEN -"
+          echo "Docker secret created"
 
       - name: Deploy Stack
         uses: ./.staxless-deploy/actions/deploy-stack

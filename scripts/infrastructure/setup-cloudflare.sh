@@ -203,20 +203,15 @@ cf_api PUT "$CF_API/accounts/$ACCOUNT_ID/cfd_tunnel/$TUNNEL_ID/configurations" "
 
 echo "Tunnel ingress configured"
 
-# ── Step 7: Create Docker secret on manager ────────────────────────
-echo "Creating Docker secret: CLOUDFLARE_TUNNEL_TOKEN..."
-ssh root@"$MANAGER_IP" "docker secret rm CLOUDFLARE_TUNNEL_TOKEN 2>/dev/null" || true
-printf '%s' "$TUNNEL_TOKEN" | ssh root@"$MANAGER_IP" "docker secret create CLOUDFLARE_TUNNEL_TOKEN -"
-echo "Docker secret created"
-
-# ── Step 8: Store as GitHub repo secret ────────────────────────────
+# ── Step 7: Store as GitHub repo secret ────────────────────────────
 echo "Storing CLOUDFLARE_TUNNEL_TOKEN as GitHub repo secret..."
 echo "$TUNNEL_TOKEN" | gh secret set CLOUDFLARE_TUNNEL_TOKEN --repo "$GITHUB_REPOSITORY"
 echo "GitHub secret set"
 
-# ── Step 9: Write outputs ──────────────────────────────────────────
+# ── Step 8: Write outputs ──────────────────────────────────────────
 if [ -n "$GITHUB_OUTPUT" ]; then
   echo "tunnel_id=$TUNNEL_ID" >> "$GITHUB_OUTPUT"
+  echo "tunnel_token=$TUNNEL_TOKEN" >> "$GITHUB_OUTPUT"
 fi
 
 echo "Cloudflare setup complete"
