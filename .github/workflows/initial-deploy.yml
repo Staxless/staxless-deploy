@@ -392,6 +392,11 @@ jobs:
           do_token: ${{ secrets.DIGITALOCEAN_TOKEN }}
           stack_name: ${{ needs.provision.outputs.stack_name }}
 
+      - name: Login to GHCR on manager
+        run: |
+          ssh root@${{ needs.provision.outputs.manager_ip }} \
+            "echo '${{ secrets.GHCR_TOKEN }}' | docker login ghcr.io -u '${{ github.actor }}' --password-stdin"
+
       - name: Deploy Stack
         uses: ./.staxless-deploy/actions/deploy-stack
         with:
