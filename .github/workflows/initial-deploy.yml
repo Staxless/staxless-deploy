@@ -405,6 +405,28 @@ jobs:
           manager_ip: ${{ needs.provision.outputs.manager_ip }}
           stack_name: ${{ needs.provision.outputs.stack_name }}
 
+      - name: Remove stack and volumes on failure
+        if: failure()
+        run: |
+          MANAGER_IP="${{ needs.provision.outputs.manager_ip }}"
+          STACK="${{ needs.provision.outputs.stack_name }}"
+
+          echo "Deploy failed — removing stack and associated volumes..."
+
+          echo "Removing stack: $STACK"
+          ssh root@"$MANAGER_IP" "docker stack rm $STACK" || true
+
+          echo "Waiting for stack removal to complete..."
+          sleep 10
+
+          echo "Removing dangling volumes..."
+          ssh root@"$MANAGER_IP" "docker volume prune -f" || true
+
+          echo "Remaining volumes:"
+          ssh root@"$MANAGER_IP" "docker volume ls"
+
+          echo "Stack and volumes cleaned up"
+
   # ── Cleanup: always remove SSH access ─────────────────────────
   cleanup:
     name: Cleanup SSH
