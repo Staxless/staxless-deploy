@@ -81,6 +81,8 @@ on:
         required: false
       GHCR_TOKEN:
         required: false
+      GH_PAT:
+        required: false
 
 jobs:
   # ── Phase 1: Provision infrastructure ──────────────────────────
@@ -153,7 +155,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     outputs:
-      database_url: ${{ steps.capture.outputs.database_url }}
+      database_url: ${{ steps.mongodb.outputs.database_url }}
     steps:
       - name: Checkout staxless-deploy
         uses: actions/checkout@v4
@@ -162,25 +164,27 @@ jobs:
           path: .staxless-deploy
 
       - name: Setup MongoDB Atlas
-        id: capture
+        id: mongodb
         env:
           MONGODB_ATLAS_PUBLIC_KEY: ${{ secrets.MONGODB_ATLAS_PUBLIC_KEY }}
           MONGODB_ATLAS_PRIVATE_KEY: ${{ secrets.MONGODB_ATLAS_PRIVATE_KEY }}
           MONGODB_ATLAS_PROJECT_ID: ${{ secrets.MONGODB_ATLAS_PROJECT_ID }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          DATABASE_NAME: ${{ needs.provision.outputs.stack_name || inputs.stack_name }}
+          GH_TOKEN: ${{ secrets.GHCR_TOKEN }}
         run: |
-          # Capture script output, extract DATABASE_URL from marker line
-          OUTPUT=$(bash .staxless-deploy/scripts/infrastructure/setup-mongodb-atlas.sh)
-          echo "$OUTPUT"
+          bash .staxless-deploy/scripts/infrastructure/setup-mongodb-atlas.sh
 
-          DATABASE_URL=$(echo "$OUTPUT" | grep '^STAXLESS_DB_RESULT:' | sed 's/^STAXLESS_DB_RESULT://')
-
-          if [ -z "$DATABASE_URL" ]; then
-            echo "::error::setup-mongodb-atlas.sh did not produce a DATABASE_URL"
-            exit 1
+          # On first run the script writes DATABASE_URL to GITHUB_ENV
+          # Pass it as job output so finalize-mongodb can use it this run
+          if [ -n "$DATABASE_URL" ]; then
+            echo "::add-mask::$DATABASE_URL"
+            echo "database_url=$DATABASE_URL" >> "$GITHUB_OUTPUT"
+          elif [ -f "$GITHUB_ENV" ] && grep -q '^DATABASE_URL=' "$GITHUB_ENV"; then
+            DB_URL=$(grep '^DATABASE_URL=' "$GITHUB_ENV" | cut -d= -f2-)
+            echo "::add-mask::$DB_URL"
+            echo "database_url=$DB_URL" >> "$GITHUB_OUTPUT"
           fi
-
-          echo "::add-mask::$DATABASE_URL"
-          echo "database_url=$DATABASE_URL" >> "$GITHUB_OUTPUT"
 
   # ── Phase 2: Build images + Setup swarm (parallel) ────────────
   build-images:
@@ -289,6 +293,7 @@ jobs:
           STRIPE_WEBHOOK_SECRET: ${{ secrets.STRIPE_WEBHOOK_SECRET }}
           MAILGUN_API_KEY: ${{ secrets.MAILGUN_API_KEY }}
           CLOUDFLARE_TUNNEL_TOKEN: ${{ secrets.CLOUDFLARE_TUNNEL_TOKEN }}
+          GH_PAT: ${{ secrets.GH_PAT }}
         run: |
           echo "Creating Docker secrets..."
 
@@ -310,19 +315,10 @@ jobs:
   finalize-mongodb:
     name: Finalize MongoDB
     needs: [provision, setup-mongodb, setup-swarm]
-    if: inputs.mongodb_setup && needs.setup-mongodb.result == 'success' && !cancelled()
+    if: inputs.mongodb_setup && !cancelled()
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - name: Validate MongoDB output
-        run: |
-          DATABASE_URL="${{ needs.setup-mongodb.outputs.database_url }}"
-          if [ -z "$DATABASE_URL" ]; then
-            echo "::error::DATABASE_URL is empty — setup-mongodb did not produce a connection string"
-            exit 1
-          fi
-          echo "DATABASE_URL received from setup-mongodb"
-
       - name: Checkout staxless-deploy
         uses: actions/checkout@v4
         with:
@@ -354,6 +350,13 @@ jobs:
           DATABASE_NAME="${{ needs.provision.outputs.stack_name }}"
           MANAGER_IP="${{ needs.provision.outputs.manager_ip }}"
 
+          if [ -z "$DATABASE_URL" ]; then
+            echo "DATABASE_URL output is empty — setup-swarm already created Docker secrets from repo secret"
+            echo "Current Docker secrets:"
+            ssh root@"$MANAGER_IP" "docker secret ls"
+            exit 0
+          fi
+
           upsert_secret() {
             local name="$1" value="$2"
             if [ -z "$value" ]; then
@@ -361,7 +364,6 @@ jobs:
               return
             fi
             echo "Upserting Docker secret: $name"
-            # Remove old secret if it exists (ignore error if it doesn't)
             ssh root@"$MANAGER_IP" "docker secret rm $name 2>/dev/null" || true
             printf '%s' "$value" | ssh root@"$MANAGER_IP" "docker secret create $name -"
           }

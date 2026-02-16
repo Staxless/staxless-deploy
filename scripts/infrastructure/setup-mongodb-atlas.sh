@@ -3,6 +3,12 @@ set -e
 
 echo "Setting up MongoDB Atlas..."
 
+# If DATABASE_URL is already set (from repo secret), skip entirely
+if [ -n "$DATABASE_URL" ]; then
+  echo "DATABASE_URL already set — skipping MongoDB Atlas setup"
+  exit 0
+fi
+
 # Validate required environment variables
 for var in MONGODB_ATLAS_PROJECT_ID MONGODB_ATLAS_PUBLIC_KEY MONGODB_ATLAS_PRIVATE_KEY; do
   if [ -z "${!var}" ]; then
@@ -13,6 +19,7 @@ done
 
 CLUSTER_NAME="${CLUSTER_NAME:-staxless-production}"
 DB_USERNAME="${DB_USERNAME:-staxless-app}"
+DATABASE_NAME="${DATABASE_NAME:-staxless}"
 
 API_BASE="https://cloud.mongodb.com/api/atlas/v2"
 PROJECT_ID="$MONGODB_ATLAS_PROJECT_ID"
@@ -87,14 +94,13 @@ if [ "$STATE" != "IDLE" ]; then
   exit 1
 fi
 
-# Create or update database user
-# Check if user already exists — if so, update password; otherwise create
+# Create database user (only on first run — never rotate password)
 echo "Checking for existing database user: $DB_USERNAME..."
 if atlas_api GET "$API_BASE/groups/$PROJECT_ID/databaseUsers/admin/$DB_USERNAME" &>/dev/null; then
-  echo "User exists, updating password..."
-  atlas_api PATCH "$API_BASE/groups/$PROJECT_ID/databaseUsers/admin/$DB_USERNAME" "{
-    \"password\": \"$DB_PASSWORD\"
-  }"
+  echo "User already exists — skipping (password unchanged)"
+  echo "Error: DATABASE_URL is not set but user already exists. Cannot retrieve existing password."
+  echo "Delete the Atlas user '$DB_USERNAME' and re-run, or set DATABASE_URL repo secret manually."
+  exit 1
 else
   echo "Creating database user: $DB_USERNAME..."
   atlas_api POST "$API_BASE/groups/$PROJECT_ID/databaseUsers" "{
@@ -123,8 +129,15 @@ fi
 CLUSTER_HOSTNAME=$(echo "$SRV_URL" | sed 's|mongodb+srv://||')
 DATABASE_URL="mongodb+srv://${DB_USERNAME}:${DB_PASSWORD}@${CLUSTER_HOSTNAME}"
 
-# Print the URL on a known marker line so the caller can capture it
 echo "::add-mask::$DATABASE_URL"
-echo "STAXLESS_DB_RESULT:${DATABASE_URL}"
+
+# Store DATABASE_URL and DATABASE_NAME as GitHub repo secrets
+echo "Setting DATABASE_URL repo secret..."
+echo "$DATABASE_URL" | gh secret set DATABASE_URL
+echo "Setting DATABASE_NAME repo secret..."
+echo "$DATABASE_NAME" | gh secret set DATABASE_NAME
+
+# Export to GITHUB_ENV so the current workflow run can use it
+echo "DATABASE_URL=$DATABASE_URL" >> "$GITHUB_ENV"
 
 echo "MongoDB Atlas setup complete"
