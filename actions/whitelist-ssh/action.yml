@@ -51,10 +51,14 @@ runs:
         CURRENT_OUTBOUND=$(jq '.firewall.outbound_rules' /tmp/fw_current.json)
         echo "Runner IP: $RUNNER_IP"
 
-        # Remove any existing SSH rule and add new one with runner IP
+        # Add runner IP to existing SSH rule (preserve other runners' IPs)
         NEW_INBOUND=$(echo "$CURRENT_INBOUND" | jq --arg runner_ip "$RUNNER_IP" '
+          ( [.[] | select(.ports == "22")] | if length > 0
+            then .[0].sources.addresses else [] end
+          ) as $existing |
+          ($existing + [$runner_ip + "/32"] | unique) as $merged |
           [.[] | select(.ports != "22")] +
-          [{protocol: "tcp", ports: "22", sources: {addresses: [$runner_ip + "/32"]}}]
+          [{protocol: "tcp", ports: "22", sources: {addresses: $merged}}]
         ')
 
         # Update firewall
