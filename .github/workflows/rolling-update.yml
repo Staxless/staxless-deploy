@@ -1,0 +1,173 @@
+name: Rolling Update
+
+on:
+  workflow_call:
+    inputs:
+      services:
+        type: string
+        default: all
+        description: Comma-separated list of services to update, or "all"
+      auto_detect:
+        type: boolean
+        default: false
+        description: Auto-detect changed services from git diff (requires fetch-depth 2)
+      stack_name:
+        type: string
+        default: ''
+      compose_file:
+        type: string
+        default: ''
+      bake_file:
+        type: string
+        default: ''
+      registry_type:
+        type: string
+        default: ghcr
+    secrets:
+      SSH_PRIVATE_KEY:
+        required: true
+      MANAGER_IP:
+        required: true
+      DIGITALOCEAN_TOKEN:
+        required: false
+      GHCR_TOKEN:
+        required: false
+
+jobs:
+  update:
+    name: Rolling Update
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout consumer repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: ${{ inputs.auto_detect && 2 || 1 }}
+
+      - name: Detect changed services
+        id: detect
+        if: inputs.auto_detect && inputs.services == 'all'
+        shell: bash
+        run: |
+          CHANGED=$(git diff --name-only HEAD~1 HEAD 2>/dev/null || echo "")
+
+          # If diff fails (e.g. initial commit), fall back to "all"
+          if [ -z "$CHANGED" ]; then
+            echo "Could not diff — updating all services"
+            echo "services=all" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "Changed files:"
+          echo "$CHANGED"
+          echo ""
+
+          # Check for infra/compose/workflow changes → full redeploy
+          if echo "$CHANGED" | grep -qE '^docker/|^\.github/'; then
+            echo "Infrastructure or workflow changes detected — updating all services"
+            echo "services=all" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Extract service names from microservices/ changes
+          SERVICES=$(echo "$CHANGED" | grep '^microservices/' | cut -d'/' -f2 | sort -u | paste -sd',' -)
+
+          if [ -z "$SERVICES" ]; then
+            echo "No deployable service changes detected — skipping"
+            echo "services=none" >> "$GITHUB_OUTPUT"
+          else
+            echo "Detected changed services: $SERVICES"
+            echo "services=$SERVICES" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Resolve services
+        id: services
+        shell: bash
+        run: |
+          DETECTED="${{ steps.detect.outputs.services }}"
+          INPUT="${{ inputs.services }}"
+
+          # Detection result takes priority when auto_detect is on
+          if [ -n "$DETECTED" ]; then
+            echo "resolved=$DETECTED" >> "$GITHUB_OUTPUT"
+          else
+            echo "resolved=$INPUT" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Skip if no changes
+        if: steps.services.outputs.resolved == 'none'
+        shell: bash
+        run: |
+          echo "No deployable changes — skipping build and update"
+          exit 0
+
+      - name: Checkout staxless-deploy
+        if: steps.services.outputs.resolved != 'none'
+        uses: actions/checkout@v4
+        with:
+          repository: staxless/staxless-deploy
+          path: .staxless-deploy
+
+      - name: Resolve Config
+        if: steps.services.outputs.resolved != 'none'
+        id: config
+        uses: ./.staxless-deploy/actions/resolve-config
+        with:
+          stack_name: ${{ inputs.stack_name }}
+          compose_file: ${{ inputs.compose_file }}
+          bake_file: ${{ inputs.bake_file }}
+
+      - name: Setup SSH
+        if: steps.services.outputs.resolved != 'none'
+        uses: ./.staxless-deploy/actions/setup-ssh
+        with:
+          ssh_private_key: ${{ secrets.SSH_PRIVATE_KEY }}
+
+      - name: Registry Login
+        if: steps.services.outputs.resolved != 'none'
+        uses: ./.staxless-deploy/actions/registry-login
+        with:
+          registry_type: ${{ inputs.registry_type }}
+          github_token: ${{ github.token }}
+          ghcr_token: ${{ secrets.GHCR_TOKEN }}
+          github_actor: ${{ github.actor }}
+          do_token: ${{ secrets.DIGITALOCEAN_TOKEN }}
+
+      - name: Build Images
+        if: steps.services.outputs.resolved != 'none'
+        uses: ./.staxless-deploy/actions/build-images
+        with:
+          services: ${{ steps.services.outputs.resolved }}
+          bake_file: ${{ steps.config.outputs.bake_file }}
+
+      - name: Whitelist SSH
+        if: steps.services.outputs.resolved != 'none'
+        uses: ./.staxless-deploy/actions/whitelist-ssh
+        with:
+          do_token: ${{ secrets.DIGITALOCEAN_TOKEN }}
+          stack_name: ${{ steps.config.outputs.stack_name }}
+
+      - name: Rolling Update
+        if: steps.services.outputs.resolved != 'none'
+        uses: ./.staxless-deploy/actions/rolling-update
+        with:
+          manager_ip: ${{ secrets.MANAGER_IP }}
+          services: ${{ steps.services.outputs.resolved }}
+          stack_name: ${{ steps.config.outputs.stack_name }}
+
+      - name: Health Check
+        if: steps.services.outputs.resolved != 'none'
+        uses: ./.staxless-deploy/actions/health-check
+        with:
+          manager_ip: ${{ secrets.MANAGER_IP }}
+          stack_name: ${{ steps.config.outputs.stack_name }}
+
+      - name: Remove SSH Whitelist
+        if: always()
+        uses: ./.staxless-deploy/actions/remove-ssh
+        with:
+          do_token: ${{ secrets.DIGITALOCEAN_TOKEN }}
+          stack_name: ${{ steps.config.outputs.stack_name }}

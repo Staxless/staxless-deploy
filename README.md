@@ -30,7 +30,7 @@ Reusable GitHub Actions workflows for deploying Staxless applications to Docker 
 
 Add these to your repo under `.github/workflows/`:
 
-**deploy.yml** — Update services (auto-triggers on push):
+**deploy.yml** — Rolling update services (auto-triggers on push, auto-detects changed services):
 
 ```yaml
 name: Deploy
@@ -46,9 +46,10 @@ on:
 
 jobs:
   update:
-    uses: staxless/staxless-deploy/.github/workflows/update-services.yml@v1
+    uses: staxless/staxless-deploy/.github/workflows/rolling-update.yml@v1
     with:
       services: ${{ inputs.services || 'all' }}
+      auto_detect: ${{ github.event_name == 'push' }}
     secrets: inherit
 ```
 
@@ -114,7 +115,7 @@ jobs:
 | Workflow | Description |
 |----------|-------------|
 | `initial-deploy.yml` | Full infrastructure provisioning + service deployment |
-| `update-services.yml` | Rolling updates with automatic rollback |
+| `rolling-update.yml` | Rolling updates with auto-detect and convergence verification |
 | `add-service.yml` | Deploy a new service to an existing stack |
 | `destroy.yml` | Graceful shutdown + infrastructure teardown |
 
@@ -196,7 +197,7 @@ The entire flow is idempotent — re-running the workflow safely finds and reuse
 staxless-deploy/
 ├── .github/workflows/          # Reusable workflows
 │   ├── initial-deploy.yml      # Full infra + services
-│   ├── update-services.yml     # Rolling updates
+│   ├── rolling-update.yml      # Rolling updates
 │   ├── add-service.yml         # New service deployment
 │   └── destroy.yml             # Teardown
 ├── actions/                    # Composite actions

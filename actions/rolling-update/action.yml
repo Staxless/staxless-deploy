@@ -1,5 +1,5 @@
 name: Rolling Update
-description: Perform zero-downtime rolling updates with automatic rollback
+description: Perform zero-downtime rolling updates with automatic rollback and convergence verification
 
 inputs:
   manager_ip:
@@ -13,6 +13,10 @@ inputs:
     description: Docker stack name
     required: false
     default: staxless
+  convergence_timeout:
+    description: Max seconds to wait for each service to converge
+    required: false
+    default: '120'
 
 runs:
   using: composite
@@ -23,6 +27,7 @@ runs:
         MANAGER_IP="${{ inputs.manager_ip }}"
         SERVICES="${{ inputs.services }}"
         STACK="${{ inputs.stack_name }}"
+        MAX_WAIT="${{ inputs.convergence_timeout }}"
 
         echo "Rolling update for: $SERVICES"
 
@@ -39,11 +44,15 @@ runs:
 
         FAILED=0
         for service in $SERVICE_LIST; do
-          echo "Updating: $service"
+          echo ""
+          echo "=== Updating: $service ==="
 
           CURRENT_IMAGE=$(ssh root@"$MANAGER_IP" "docker service inspect $service --format '{{.Spec.TaskTemplate.ContainerSpec.Image}}'")
           IMAGE_BASE=$(echo "$CURRENT_IMAGE" | cut -d: -f1)
           NEW_IMAGE="${IMAGE_BASE}:latest"
+
+          echo "Current: $CURRENT_IMAGE"
+          echo "Target:  $NEW_IMAGE"
 
           ssh root@"$MANAGER_IP" "docker service update \
             --image $NEW_IMAGE \
@@ -53,23 +62,47 @@ runs:
             --update-monitor 30s \
             $service"
 
-          sleep 5
+          # Wait for convergence — verify tasks are running the new image
+          ELAPSED=0
+          INTERVAL=10
+          CONVERGED=false
 
-          UPDATE_STATUS=$(ssh root@"$MANAGER_IP" "docker service inspect $service --format '{{.UpdateStatus.State}}'")
+          while [ "$ELAPSED" -lt "$MAX_WAIT" ]; do
+            sleep "$INTERVAL"
+            ELAPSED=$((ELAPSED + INTERVAL))
 
-          if [ "$UPDATE_STATUS" = "completed" ]; then
-            echo "$service updated successfully"
-          elif [ "$UPDATE_STATUS" = "rollback_completed" ]; then
-            echo "FAILED: $service rolled back"
+            STATE=$(ssh root@"$MANAGER_IP" "docker service inspect $service --format '{{.UpdateStatus.State}}'")
+
+            if [ "$STATE" = "completed" ]; then
+              # Verify running tasks match the desired image
+              RUNNING_IMAGES=$(ssh root@"$MANAGER_IP" "docker service ps $service --filter desired-state=running --format '{{.Image}}' | sort -u")
+
+              if echo "$RUNNING_IMAGES" | grep -q "$IMAGE_BASE"; then
+                echo "$service converged on $NEW_IMAGE (${ELAPSED}s)"
+                CONVERGED=true
+                break
+              fi
+            elif [ "$STATE" = "rollback_completed" ]; then
+              echo "FAILED: $service rolled back to previous image"
+              FAILED=1
+              CONVERGED=true
+              break
+            fi
+
+            echo "  waiting for $service to converge (${ELAPSED}/${MAX_WAIT}s, state=$STATE)"
+          done
+
+          if [ "$CONVERGED" = "false" ]; then
+            echo "FAILED: $service did not converge within ${MAX_WAIT}s (state=$STATE)"
+            ssh root@"$MANAGER_IP" "docker service ps $service --no-trunc" || true
             FAILED=1
-          else
-            echo "$service status: $UPDATE_STATUS"
           fi
         done
 
+        echo ""
         if [ "$FAILED" -eq 1 ]; then
           echo "One or more services failed to update"
           exit 1
         fi
 
-        echo "All services updated"
+        echo "All services updated and converged"
