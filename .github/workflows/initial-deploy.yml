@@ -419,13 +419,13 @@ jobs:
           echo "Waiting for stack removal to complete..."
           sleep 10
 
+          echo "Removing all Docker secrets..."
+          ssh root@"$MANAGER_IP" "docker secret ls -q | xargs -r docker secret rm" || true
+
           echo "Removing dangling volumes..."
           ssh root@"$MANAGER_IP" "docker volume prune -f" || true
 
-          echo "Remaining volumes:"
-          ssh root@"$MANAGER_IP" "docker volume ls"
-
-          echo "Stack and volumes cleaned up"
+          echo "Cleanup complete"
 
   # ── Cleanup: always remove SSH access ─────────────────────────
   cleanup:
