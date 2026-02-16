@@ -94,13 +94,13 @@ if [ "$STATE" != "IDLE" ]; then
   exit 1
 fi
 
-# Create database user (only on first run — never rotate password)
+# Create database user, or reset password if user exists but DATABASE_URL was lost
 echo "Checking for existing database user: $DB_USERNAME..."
 if atlas_api GET "$API_BASE/groups/$PROJECT_ID/databaseUsers/admin/$DB_USERNAME" &>/dev/null; then
-  echo "User already exists — skipping (password unchanged)"
-  echo "Error: DATABASE_URL is not set but user already exists. Cannot retrieve existing password."
-  echo "Delete the Atlas user '$DB_USERNAME' and re-run, or set DATABASE_URL repo secret manually."
-  exit 1
+  echo "User already exists but DATABASE_URL is not set — resetting password to recover"
+  atlas_api PATCH "$API_BASE/groups/$PROJECT_ID/databaseUsers/admin/$DB_USERNAME" "{
+    \"password\": \"$DB_PASSWORD\"
+  }"
 else
   echo "Creating database user: $DB_USERNAME..."
   atlas_api POST "$API_BASE/groups/$PROJECT_ID/databaseUsers" "{

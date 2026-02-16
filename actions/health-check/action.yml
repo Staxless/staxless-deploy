@@ -6,7 +6,15 @@ inputs:
     description: Manager node public IP
     required: true
   wait_seconds:
-    description: Seconds to wait before checking
+    description: Seconds to wait before first check
+    required: false
+    default: '30'
+  max_attempts:
+    description: Number of health check attempts before failing
+    required: false
+    default: '10'
+  check_interval:
+    description: Seconds between health check attempts
     required: false
     default: '30'
   stack_name:
@@ -28,31 +36,44 @@ runs:
       run: |
         MANAGER_IP="${{ inputs.manager_ip }}"
         STACK="${{ inputs.stack_name }}"
+        MAX_ATTEMPTS=${{ inputs.max_attempts }}
+        CHECK_INTERVAL=${{ inputs.check_interval }}
 
-        echo "Checking service health..."
+        for attempt in $(seq 1 "$MAX_ATTEMPTS"); do
+          echo "Health check attempt $attempt/$MAX_ATTEMPTS..."
 
-        FAILED=0
-        while IFS= read -r line; do
-          SERVICE=$(echo "$line" | awk '{print $1}')
-          REPLICAS=$(echo "$line" | awk '{print $2}')
-          RUNNING=$(echo "$REPLICAS" | cut -d'/' -f1)
-          DESIRED=$(echo "$REPLICAS" | cut -d'/' -f2)
+          FAILED=0
+          while IFS= read -r line; do
+            SERVICE=$(echo "$line" | awk '{print $1}')
+            REPLICAS=$(echo "$line" | awk '{print $2}')
+            RUNNING=$(echo "$REPLICAS" | cut -d'/' -f1)
+            DESIRED=$(echo "$REPLICAS" | cut -d'/' -f2)
 
-          if [ "$RUNNING" != "$DESIRED" ]; then
-            echo "UNHEALTHY: $SERVICE ($RUNNING/$DESIRED replicas)"
-            FAILED=1
-          else
-            echo "HEALTHY: $SERVICE ($RUNNING/$DESIRED replicas)"
+            if [ "$RUNNING" != "$DESIRED" ]; then
+              echo "  UNHEALTHY: $SERVICE ($RUNNING/$DESIRED replicas)"
+              FAILED=1
+            else
+              echo "  HEALTHY: $SERVICE ($RUNNING/$DESIRED replicas)"
+            fi
+          done <<< "$(ssh root@"$MANAGER_IP" "docker service ls --filter name=${STACK}_ --format '{{.Name}} {{.Replicas}}'")"
+
+          if [ "$FAILED" -eq 0 ]; then
+            echo ""
+            echo "All services healthy"
+            exit 0
           fi
-        done <<< "$(ssh root@"$MANAGER_IP" "docker service ls --filter name=${STACK}_ --format '{{.Name}} {{.Replicas}}'")"
 
-        if [ "$FAILED" -eq 1 ]; then
-          echo ""
-          echo "Service details:"
-          ssh root@"$MANAGER_IP" "docker service ls"
-          echo ""
-          echo "One or more services are unhealthy"
-          exit 1
-        fi
+          if [ "$attempt" -lt "$MAX_ATTEMPTS" ]; then
+            echo ""
+            echo "Some services not ready, retrying in ${CHECK_INTERVAL}s..."
+            echo ""
+            sleep "$CHECK_INTERVAL"
+          fi
+        done
 
-        echo "All services healthy"
+        echo ""
+        echo "Services still unhealthy after $MAX_ATTEMPTS attempts ($(( MAX_ATTEMPTS * CHECK_INTERVAL ))s total)"
+        echo ""
+        echo "Service details:"
+        ssh root@"$MANAGER_IP" "docker service ls"
+        exit 1
