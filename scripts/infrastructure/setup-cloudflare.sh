@@ -3,8 +3,14 @@ set -e
 
 echo "Setting up Cloudflare Tunnel..."
 
+# Skip if Cloudflare credentials are not configured
+if [ -z "$CLOUDFLARE_API_TOKEN" ]; then
+  echo "CLOUDFLARE_API_TOKEN is not set — skipping Cloudflare setup"
+  exit 0
+fi
+
 # Validate required environment variables
-for var in CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID DOMAIN STACK_NAME MANAGER_IP COMPOSE_FILE; do
+for var in CLOUDFLARE_ACCOUNT_ID DOMAIN STACK_NAME MANAGER_IP COMPOSE_FILE; do
   if [ -z "${!var}" ]; then
     echo "Error: $var is not set"
     exit 1

@@ -304,7 +304,6 @@ jobs:
   setup-cloudflare:
     name: Setup Cloudflare
     needs: provision
-    if: ${{ secrets.CLOUDFLARE_API_TOKEN != '' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     outputs:
