@@ -122,6 +122,26 @@ resource "digitalocean_firewall" "main" {
     destination_addresses = ["0.0.0.0/0", "::/0"]
   }
 
+  # Outbound: Cloudflare Tunnel (cloudflared connects to edge on port 7844)
+  outbound_rule {
+    protocol              = "tcp"
+    port_range            = "7844"
+    destination_addresses = ["0.0.0.0/0", "::/0"]
+  }
+
+  outbound_rule {
+    protocol              = "udp"
+    port_range            = "7844"
+    destination_addresses = ["0.0.0.0/0", "::/0"]
+  }
+
+  # Outbound: MongoDB Atlas
+  outbound_rule {
+    protocol              = "tcp"
+    port_range            = "27017"
+    destination_addresses = ["0.0.0.0/0", "::/0"]
+  }
+
   # Outbound: HTTP
   outbound_rule {
     protocol              = "tcp"
