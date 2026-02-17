@@ -31,15 +31,53 @@ runs:
 
         echo "Rolling update for: $SERVICES"
 
+        # Third-party infra services — skip on "all", include when kafka is explicitly requested
+        INFRA_SKIP="zookeeper kafka-service kafka-setup"
+
         if [ "$SERVICES" = "all" ]; then
-          SERVICE_LIST=$(ssh root@"$MANAGER_IP" "docker service ls --format '{{.Name}}' | grep '^${STACK}_'")
+          SERVICE_LIST=""
+          ALL_SERVICES=$(ssh root@"$MANAGER_IP" "docker service ls --format '{{.Name}}' | grep '^${STACK}_'")
+          for service in $ALL_SERVICES; do
+            SHORT_NAME="${service#${STACK}_}"
+            SKIP=false
+            for infra in $INFRA_SKIP; do
+              if [ "$SHORT_NAME" = "$infra" ]; then
+                SKIP=true
+                break
+              fi
+            done
+            if [ "$SKIP" = "true" ]; then
+              echo "SKIP: $service (infra service, not included in 'all')"
+            else
+              SERVICE_LIST="$SERVICE_LIST $service"
+            fi
+          done
         else
           SERVICE_LIST=""
+          INCLUDE_KAFKA_INFRA=false
           IFS=',' read -ra SERVICE_NAMES <<< "$SERVICES"
+
+          # If kafka is explicitly requested, include all three kafka/zookeeper services
+          for service in "${SERVICE_NAMES[@]}"; do
+            service=$(echo "$service" | xargs)
+            if [ "$service" = "kafka-service" ] || [ "$service" = "kafka" ]; then
+              INCLUDE_KAFKA_INFRA=true
+            fi
+          done
+
           for service in "${SERVICE_NAMES[@]}"; do
             service=$(echo "$service" | xargs)
             SERVICE_LIST="$SERVICE_LIST ${STACK}_${service}"
           done
+
+          if [ "$INCLUDE_KAFKA_INFRA" = "true" ]; then
+            for infra in $INFRA_SKIP; do
+              if ! echo "$SERVICE_LIST" | grep -qw "${STACK}_${infra}"; then
+                SERVICE_LIST="$SERVICE_LIST ${STACK}_${infra}"
+              fi
+            done
+            echo "Kafka explicitly requested — including zookeeper, kafka-service, kafka-setup"
+          fi
         fi
 
         # --- Function to update a single service ---
@@ -134,16 +172,27 @@ runs:
 
         # --- Wait for all and collect results ---
         FAILED=0
+        FAILED_SERVICES=()
+        SKIPPED_SERVICES=()
+        OK_SERVICES=()
         for i in "${!PIDS[@]}"; do
           pid="${PIDS[$i]}"
           service="${SERVICE_NAMES_ORDERED[$i]}"
           log_file="${LOG_FILES[$i]}"
 
           if wait "$pid"; then
-            echo "--- $service: OK ---"
+            # Check if it was skipped (digest match) vs actually updated
+            if grep -q "^SKIP:" "$log_file" 2>/dev/null; then
+              echo "--- $service: SKIPPED (unchanged) ---"
+              SKIPPED_SERVICES+=("$service")
+            else
+              echo "--- $service: OK ---"
+              OK_SERVICES+=("$service")
+            fi
           else
             echo "--- $service: FAILED ---"
             FAILED=1
+            FAILED_SERVICES+=("$service")
           fi
           cat "$log_file"
           echo ""
@@ -151,10 +200,19 @@ runs:
 
         rm -rf "$TMPDIR"
 
+        # --- Summary ---
         echo ""
+        echo "========== ROLLING UPDATE SUMMARY =========="
+        echo "  Updated: ${#OK_SERVICES[@]}  — ${OK_SERVICES[*]:-none}"
+        echo "  Skipped: ${#SKIPPED_SERVICES[@]}  — ${SKIPPED_SERVICES[*]:-none}"
+        echo "  Failed:  ${#FAILED_SERVICES[@]}  — ${FAILED_SERVICES[*]:-none}"
+        echo "============================================="
+
         if [ "$FAILED" -eq 1 ]; then
-          echo "One or more services failed to update"
+          echo ""
+          echo "FAILED SERVICES: ${FAILED_SERVICES[*]}"
           exit 1
         fi
 
+        echo ""
         echo "All services updated and converged"
