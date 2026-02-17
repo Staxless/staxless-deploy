@@ -73,12 +73,16 @@ runs:
 
             STATE=$(ssh root@"$MANAGER_IP" "docker service inspect $service --format '{{if .UpdateStatus}}{{.UpdateStatus.State}}{{else}}unknown{{end}}'")
 
-            if [ "$STATE" = "completed" ]; then
+            if [ "$STATE" = "completed" ] || [ "$STATE" = "unknown" ]; then
               # Verify running tasks match the desired image
               RUNNING_IMAGES=$(ssh root@"$MANAGER_IP" "docker service ps $service --filter desired-state=running --format '{{.Image}}' | sort -u")
 
               if echo "$RUNNING_IMAGES" | grep -q "$IMAGE_BASE"; then
-                echo "$service converged on $NEW_IMAGE (${ELAPSED}s)"
+                if [ "$STATE" = "unknown" ]; then
+                  echo "$service already running target image — no update needed (${ELAPSED}s)"
+                else
+                  echo "$service converged on $NEW_IMAGE (${ELAPSED}s)"
+                fi
                 CONVERGED=true
                 break
               fi
