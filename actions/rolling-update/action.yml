@@ -71,7 +71,7 @@ runs:
             sleep "$INTERVAL"
             ELAPSED=$((ELAPSED + INTERVAL))
 
-            STATE=$(ssh root@"$MANAGER_IP" "docker service inspect $service --format '{{.UpdateStatus.State}}'")
+            STATE=$(ssh root@"$MANAGER_IP" "docker service inspect $service --format '{{if .UpdateStatus}}{{.UpdateStatus.State}}{{else}}unknown{{end}}'")
 
             if [ "$STATE" = "completed" ]; then
               # Verify running tasks match the desired image
