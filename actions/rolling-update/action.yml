@@ -109,13 +109,23 @@ runs:
               exit 0
             fi
 
+            # Use digest-pinned image so Docker sees an actual spec change
+            FORCE_FLAG=""
+            if [ -n "$LATEST_DIGEST" ]; then
+              UPDATE_IMAGE="${IMAGE_BASE}@${LATEST_DIGEST}"
+            else
+              UPDATE_IMAGE="$NEW_IMAGE"
+              FORCE_FLAG="--force"
+            fi
+
             ssh root@"$MANAGER_IP" "docker service update \
               --with-registry-auth \
-              --image $NEW_IMAGE \
+              --image $UPDATE_IMAGE \
               --update-parallelism 1 \
               --update-delay 10s \
               --update-failure-action rollback \
               --update-monitor 30s \
+              $FORCE_FLAG \
               $service"
 
             # Wait for convergence
@@ -218,6 +228,10 @@ runs:
           echo "FAILED SERVICES: ${FAILED_SERVICES[*]}"
           exit 1
         fi
+
+        # Clean up dangling images left behind by previous deploys
+        echo "Pruning dangling images..."
+        ssh root@"$MANAGER_IP" "docker image prune -f" || true
 
         echo ""
         echo "All services updated and converged"

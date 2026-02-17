@@ -35,13 +35,23 @@ for service in $SERVICE_LIST; do
     continue
   fi
 
+  # Use digest-pinned image so Docker sees an actual spec change
+  FORCE_FLAG=""
+  if [ -n "$LATEST_DIGEST" ]; then
+    UPDATE_IMAGE="${IMAGE_BASE}@${LATEST_DIGEST}"
+  else
+    UPDATE_IMAGE="$NEW_IMAGE"
+    FORCE_FLAG="--force"
+  fi
+
   ssh root@"$MANAGER_IP" "docker service update \
     --with-registry-auth \
-    --image $NEW_IMAGE \
+    --image $UPDATE_IMAGE \
     --update-parallelism 1 \
     --update-delay 10s \
     --update-failure-action rollback \
     --update-monitor 30s \
+    $FORCE_FLAG \
     $service"
 
   ELAPSED=0
@@ -86,5 +96,9 @@ if [ "$FAILED" -eq 1 ]; then
   echo "One or more services failed"
   exit 1
 fi
+
+# Clean up dangling images left behind by previous deploys
+echo "Pruning dangling images..."
+ssh root@"$MANAGER_IP" "docker image prune -f" || true
 
 echo "All services updated"
