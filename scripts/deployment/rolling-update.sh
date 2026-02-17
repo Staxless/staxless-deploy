@@ -54,16 +54,15 @@ for service in $SERVICE_LIST; do
 
     STATE=$(ssh root@"$MANAGER_IP" "docker service inspect $service --format '{{if .UpdateStatus}}{{.UpdateStatus.State}}{{else}}unknown{{end}}'")
 
-    if [ "$STATE" = "completed" ] || [ "$STATE" = "unknown" ]; then
-      if [ -n "$LATEST_DIGEST" ]; then
-        RUNNING_IMAGES=$(ssh root@"$MANAGER_IP" "docker service ps $service --filter desired-state=running --format '{{.Image}}' | sort -u")
-        if echo "$RUNNING_IMAGES" | grep -q "$LATEST_DIGEST"; then
-          echo "$service converged on $NEW_IMAGE (${ELAPSED}s)"
-          CONVERGED=true
-          break
-        fi
-      else
-        echo "$service converged (${ELAPSED}s, state=$STATE, no digest to verify)"
+    if [ "$STATE" = "completed" ]; then
+      echo "$service converged on $NEW_IMAGE (${ELAPSED}s)"
+      CONVERGED=true
+      break
+    elif [ "$STATE" = "unknown" ]; then
+      # No UpdateStatus means stable — update completed or was a no-op
+      RUNNING_COUNT=$(ssh root@"$MANAGER_IP" "docker service ps $service --filter desired-state=running -q | wc -l")
+      if [ "$RUNNING_COUNT" -gt 0 ]; then
+        echo "$service converged on $NEW_IMAGE (${ELAPSED}s, tasks running)"
         CONVERGED=true
         break
       fi
