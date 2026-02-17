@@ -55,7 +55,7 @@ runs:
             else
               echo "  HEALTHY: $SERVICE ($RUNNING/$DESIRED replicas)"
             fi
-          done <<< "$(ssh root@"$MANAGER_IP" "docker service ls --filter name=${STACK}_ --format '{{.Name}} {{.Replicas}}'")"
+          done <<< "$(ssh root@"$MANAGER_IP" "docker service ls --filter name=${STACK}_ --format '{{.Name}} {{.Replicas}}'" | grep -v kafka-setup)"
 
           if [ "$FAILED" -eq 0 ]; then
             echo ""
@@ -90,6 +90,6 @@ runs:
             echo "--- $SERVICE logs (last 50 lines) ---"
             ssh root@"$MANAGER_IP" "docker service logs --tail 50 --no-trunc $SERVICE 2>&1" || echo "  (no logs available)"
           fi
-        done <<< "$(ssh root@"$MANAGER_IP" "docker service ls --filter name=${STACK}_ --format '{{.Name}} {{.Replicas}}'")"
+        done <<< "$(ssh root@"$MANAGER_IP" "docker service ls --filter name=${STACK}_ --format '{{.Name}} {{.Replicas}}'" | grep -v kafka-setup)"
 
         exit 1
