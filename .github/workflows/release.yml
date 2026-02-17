@@ -1,9 +1,6 @@
 name: "0. Release"
 on:
   workflow_call:
-    secrets:
-      GITHUB_TOKEN:
-        required: false
 
 jobs:
   release:
@@ -27,7 +24,7 @@ jobs:
 
       - name: Clean orphaned tags
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN || github.token }}
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           echo "Checking for orphaned tags (tag exists but no matching GitHub release)..."
 
@@ -72,5 +69,5 @@ jobs:
 
       - name: Run semantic-release
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN || github.token }}
+          GITHUB_TOKEN: ${{ github.token }}
         run: npx semantic-release
