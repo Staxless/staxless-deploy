@@ -150,6 +150,13 @@ jobs:
           do_token: ${{ secrets.DIGITALOCEAN_TOKEN }}
           stack_name: ${{ steps.config.outputs.stack_name }}
 
+      - name: Login to GHCR on manager
+        if: steps.services.outputs.resolved != 'none'
+        shell: bash
+        run: |
+          ssh root@${{ secrets.MANAGER_IP }} \
+            "echo '${{ secrets.GHCR_TOKEN }}' | docker login ghcr.io -u '${{ github.actor }}' --password-stdin"
+
       - name: Rolling Update
         if: steps.services.outputs.resolved != 'none'
         uses: ./.staxless-workflows/actions/rolling-update
