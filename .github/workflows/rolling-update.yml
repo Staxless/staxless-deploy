@@ -1,4 +1,4 @@
-name: Rolling Update
+name: "2. Rolling Update"
 
 on:
   workflow_call:
@@ -104,17 +104,17 @@ jobs:
           echo "No deployable changes — skipping build and update"
           exit 0
 
-      - name: Checkout staxless-deploy
+      - name: Checkout staxless-workflows
         if: steps.services.outputs.resolved != 'none'
         uses: actions/checkout@v4
         with:
-          repository: staxless/staxless-deploy
-          path: .staxless-deploy
+          repository: staxless/staxless-workflows
+          path: .staxless-workflows
 
       - name: Resolve Config
         if: steps.services.outputs.resolved != 'none'
         id: config
-        uses: ./.staxless-deploy/actions/resolve-config
+        uses: ./.staxless-workflows/actions/resolve-config
         with:
           stack_name: ${{ inputs.stack_name }}
           compose_file: ${{ inputs.compose_file }}
@@ -122,13 +122,13 @@ jobs:
 
       - name: Setup SSH
         if: steps.services.outputs.resolved != 'none'
-        uses: ./.staxless-deploy/actions/setup-ssh
+        uses: ./.staxless-workflows/actions/setup-ssh
         with:
           ssh_private_key: ${{ secrets.SSH_PRIVATE_KEY }}
 
       - name: Registry Login
         if: steps.services.outputs.resolved != 'none'
-        uses: ./.staxless-deploy/actions/registry-login
+        uses: ./.staxless-workflows/actions/registry-login
         with:
           registry_type: ${{ inputs.registry_type }}
           github_token: ${{ github.token }}
@@ -138,21 +138,21 @@ jobs:
 
       - name: Build Images
         if: steps.services.outputs.resolved != 'none'
-        uses: ./.staxless-deploy/actions/build-images
+        uses: ./.staxless-workflows/actions/build-images
         with:
           services: ${{ steps.services.outputs.resolved }}
           bake_file: ${{ steps.config.outputs.bake_file }}
 
       - name: Whitelist SSH
         if: steps.services.outputs.resolved != 'none'
-        uses: ./.staxless-deploy/actions/whitelist-ssh
+        uses: ./.staxless-workflows/actions/whitelist-ssh
         with:
           do_token: ${{ secrets.DIGITALOCEAN_TOKEN }}
           stack_name: ${{ steps.config.outputs.stack_name }}
 
       - name: Rolling Update
         if: steps.services.outputs.resolved != 'none'
-        uses: ./.staxless-deploy/actions/rolling-update
+        uses: ./.staxless-workflows/actions/rolling-update
         with:
           manager_ip: ${{ secrets.MANAGER_IP }}
           services: ${{ steps.services.outputs.resolved }}
@@ -160,14 +160,14 @@ jobs:
 
       - name: Health Check
         if: steps.services.outputs.resolved != 'none'
-        uses: ./.staxless-deploy/actions/health-check
+        uses: ./.staxless-workflows/actions/health-check
         with:
           manager_ip: ${{ secrets.MANAGER_IP }}
           stack_name: ${{ steps.config.outputs.stack_name }}
 
       - name: Remove SSH Whitelist
         if: always()
-        uses: ./.staxless-deploy/actions/remove-ssh
+        uses: ./.staxless-workflows/actions/remove-ssh
         with:
           do_token: ${{ secrets.DIGITALOCEAN_TOKEN }}
           stack_name: ${{ steps.config.outputs.stack_name }}

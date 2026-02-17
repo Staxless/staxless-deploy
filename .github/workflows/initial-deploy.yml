@@ -1,4 +1,4 @@
-name: Initial Deploy
+name: "1. Initial Deploy"
 
 on:
   workflow_call:
@@ -103,15 +103,15 @@ jobs:
       - name: Checkout consumer repo
         uses: actions/checkout@v4
 
-      - name: Checkout staxless-deploy
+      - name: Checkout staxless-workflows
         uses: actions/checkout@v4
         with:
-          repository: staxless/staxless-deploy
-          path: .staxless-deploy
+          repository: staxless/staxless-workflows
+          path: .staxless-workflows
 
       - name: Resolve Config
         id: config
-        uses: ./.staxless-deploy/actions/resolve-config
+        uses: ./.staxless-workflows/actions/resolve-config
         with:
           stack_name: ${{ inputs.stack_name }}
           region: ${{ inputs.region }}
@@ -122,19 +122,19 @@ jobs:
           bake_file: ${{ inputs.bake_file }}
 
       - name: Setup SSH
-        uses: ./.staxless-deploy/actions/setup-ssh
+        uses: ./.staxless-workflows/actions/setup-ssh
         with:
           ssh_private_key: ${{ secrets.SSH_PRIVATE_KEY }}
 
       - name: Setup Tools
-        uses: ./.staxless-deploy/actions/setup-tools
+        uses: ./.staxless-workflows/actions/setup-tools
         with:
           do_token: ${{ secrets.DIGITALOCEAN_TOKEN }}
           cloud_provider: ${{ inputs.cloud_provider }}
 
       - name: Provision Infrastructure
         id: infra
-        uses: ./.staxless-deploy/actions/terraform-provision
+        uses: ./.staxless-workflows/actions/terraform-provision
         with:
           cloud_provider: ${{ inputs.cloud_provider }}
           do_token: ${{ secrets.DIGITALOCEAN_TOKEN }}
@@ -159,11 +159,11 @@ jobs:
     outputs:
       database_url: ${{ steps.mongodb.outputs.database_url }}
     steps:
-      - name: Checkout staxless-deploy
+      - name: Checkout staxless-workflows
         uses: actions/checkout@v4
         with:
-          repository: staxless/staxless-deploy
-          path: .staxless-deploy
+          repository: staxless/staxless-workflows
+          path: .staxless-workflows
 
       - name: Setup MongoDB Atlas
         id: mongodb
@@ -174,7 +174,7 @@ jobs:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
           DATABASE_NAME: ${{ inputs.stack_name }}
           GH_TOKEN: ${{ secrets.GHCR_TOKEN }}
-        run: bash .staxless-deploy/scripts/infrastructure/setup-mongodb-atlas.sh
+        run: bash .staxless-workflows/scripts/infrastructure/setup-mongodb-atlas.sh
 
   # ── Phase 2: Build images + Setup swarm (parallel) ────────────
   build-images:
@@ -189,14 +189,14 @@ jobs:
       - name: Checkout consumer repo
         uses: actions/checkout@v4
 
-      - name: Checkout staxless-deploy
+      - name: Checkout staxless-workflows
         uses: actions/checkout@v4
         with:
-          repository: staxless/staxless-deploy
-          path: .staxless-deploy
+          repository: staxless/staxless-workflows
+          path: .staxless-workflows
 
       - name: Registry Login
-        uses: ./.staxless-deploy/actions/registry-login
+        uses: ./.staxless-workflows/actions/registry-login
         with:
           registry_type: ${{ inputs.registry_type }}
           github_token: ${{ github.token }}
@@ -205,7 +205,7 @@ jobs:
           do_token: ${{ secrets.DIGITALOCEAN_TOKEN }}
 
       - name: Build Images
-        uses: ./.staxless-deploy/actions/build-images
+        uses: ./.staxless-workflows/actions/build-images
         with:
           services: all
           bake_file: ${{ needs.provision.outputs.bake_file }}
@@ -219,25 +219,25 @@ jobs:
       - name: Checkout consumer repo
         uses: actions/checkout@v4
 
-      - name: Checkout staxless-deploy
+      - name: Checkout staxless-workflows
         uses: actions/checkout@v4
         with:
-          repository: staxless/staxless-deploy
-          path: .staxless-deploy
+          repository: staxless/staxless-workflows
+          path: .staxless-workflows
 
       - name: Setup SSH
-        uses: ./.staxless-deploy/actions/setup-ssh
+        uses: ./.staxless-workflows/actions/setup-ssh
         with:
           ssh_private_key: ${{ secrets.SSH_PRIVATE_KEY }}
 
       - name: Whitelist SSH
-        uses: ./.staxless-deploy/actions/whitelist-ssh
+        uses: ./.staxless-workflows/actions/whitelist-ssh
         with:
           do_token: ${{ secrets.DIGITALOCEAN_TOKEN }}
           stack_name: ${{ needs.provision.outputs.stack_name }}
 
       - name: Initialize Swarm
-        uses: ./.staxless-deploy/actions/init-swarm
+        uses: ./.staxless-workflows/actions/init-swarm
         with:
           manager_ip: ${{ needs.provision.outputs.manager_ip }}
           worker_ips: ${{ needs.provision.outputs.worker_ips }}
@@ -321,19 +321,19 @@ jobs:
       - name: Checkout consumer repo
         uses: actions/checkout@v4
 
-      - name: Checkout staxless-deploy
+      - name: Checkout staxless-workflows
         uses: actions/checkout@v4
         with:
-          repository: staxless/staxless-deploy
-          path: .staxless-deploy
+          repository: staxless/staxless-workflows
+          path: .staxless-workflows
 
       - name: Setup SSH
-        uses: ./.staxless-deploy/actions/setup-ssh
+        uses: ./.staxless-workflows/actions/setup-ssh
         with:
           ssh_private_key: ${{ secrets.SSH_PRIVATE_KEY }}
 
       - name: Whitelist SSH
-        uses: ./.staxless-deploy/actions/whitelist-ssh
+        uses: ./.staxless-workflows/actions/whitelist-ssh
         with:
           do_token: ${{ secrets.DIGITALOCEAN_TOKEN }}
           stack_name: ${{ needs.provision.outputs.stack_name }}
@@ -349,7 +349,7 @@ jobs:
           COMPOSE_FILE: ${{ needs.provision.outputs.compose_file }}
           GITHUB_REPOSITORY: ${{ github.repository }}
           GH_TOKEN: ${{ secrets.GHCR_TOKEN }}
-        run: bash .staxless-deploy/scripts/infrastructure/setup-cloudflare.sh
+        run: bash .staxless-workflows/scripts/infrastructure/setup-cloudflare.sh
 
   # ── Phase 2c: Finalize MongoDB (whitelist IPs + create DB secret) ──
   finalize-mongodb:
@@ -359,19 +359,19 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - name: Checkout staxless-deploy
+      - name: Checkout staxless-workflows
         uses: actions/checkout@v4
         with:
-          repository: staxless/staxless-deploy
-          path: .staxless-deploy
+          repository: staxless/staxless-workflows
+          path: .staxless-workflows
 
       - name: Setup SSH
-        uses: ./.staxless-deploy/actions/setup-ssh
+        uses: ./.staxless-workflows/actions/setup-ssh
         with:
           ssh_private_key: ${{ secrets.SSH_PRIVATE_KEY }}
 
       - name: Whitelist SSH
-        uses: ./.staxless-deploy/actions/whitelist-ssh
+        uses: ./.staxless-workflows/actions/whitelist-ssh
         with:
           do_token: ${{ secrets.DIGITALOCEAN_TOKEN }}
           stack_name: ${{ needs.provision.outputs.stack_name }}
@@ -382,7 +382,7 @@ jobs:
           MONGODB_ATLAS_PRIVATE_KEY: ${{ secrets.MONGODB_ATLAS_PRIVATE_KEY }}
           MONGODB_ATLAS_PROJECT_ID: ${{ secrets.MONGODB_ATLAS_PROJECT_ID }}
           ALL_NODE_IPS: ${{ needs.provision.outputs.all_node_ips }}
-        run: bash .staxless-deploy/scripts/infrastructure/whitelist-mongodb-atlas.sh
+        run: bash .staxless-workflows/scripts/infrastructure/whitelist-mongodb-atlas.sh
 
       - name: Create MongoDB Secrets
         run: |
@@ -427,19 +427,19 @@ jobs:
       - name: Checkout consumer repo
         uses: actions/checkout@v4
 
-      - name: Checkout staxless-deploy
+      - name: Checkout staxless-workflows
         uses: actions/checkout@v4
         with:
-          repository: staxless/staxless-deploy
-          path: .staxless-deploy
+          repository: staxless/staxless-workflows
+          path: .staxless-workflows
 
       - name: Setup SSH
-        uses: ./.staxless-deploy/actions/setup-ssh
+        uses: ./.staxless-workflows/actions/setup-ssh
         with:
           ssh_private_key: ${{ secrets.SSH_PRIVATE_KEY }}
 
       - name: Whitelist SSH
-        uses: ./.staxless-deploy/actions/whitelist-ssh
+        uses: ./.staxless-workflows/actions/whitelist-ssh
         with:
           do_token: ${{ secrets.DIGITALOCEAN_TOKEN }}
           stack_name: ${{ needs.provision.outputs.stack_name }}
@@ -450,14 +450,14 @@ jobs:
             "echo '${{ secrets.GHCR_TOKEN }}' | docker login ghcr.io -u '${{ github.actor }}' --password-stdin"
 
       - name: Deploy Stack
-        uses: ./.staxless-deploy/actions/deploy-stack
+        uses: ./.staxless-workflows/actions/deploy-stack
         with:
           manager_ip: ${{ needs.provision.outputs.manager_ip }}
           compose_file: ${{ needs.provision.outputs.compose_file }}
           stack_name: ${{ needs.provision.outputs.stack_name }}
 
       - name: Health Check
-        uses: ./.staxless-deploy/actions/health-check
+        uses: ./.staxless-workflows/actions/health-check
         with:
           manager_ip: ${{ needs.provision.outputs.manager_ip }}
           stack_name: ${{ needs.provision.outputs.stack_name }}
@@ -499,14 +499,14 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Checkout staxless-deploy
+      - name: Checkout staxless-workflows
         uses: actions/checkout@v4
         with:
-          repository: staxless/staxless-deploy
-          path: .staxless-deploy
+          repository: staxless/staxless-workflows
+          path: .staxless-workflows
 
       - name: Remove SSH Whitelist
-        uses: ./.staxless-deploy/actions/remove-ssh
+        uses: ./.staxless-workflows/actions/remove-ssh
         with:
           do_token: ${{ secrets.DIGITALOCEAN_TOKEN }}
           stack_name: ${{ needs.provision.outputs.stack_name }}

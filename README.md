@@ -1,6 +1,6 @@
 <div align="center">
 
-# Staxless Deploy
+# Staxless Workflows
 
 **Deploy Simple. Scale Smarter.**
 
@@ -46,7 +46,7 @@ on:
 
 jobs:
   update:
-    uses: staxless/staxless-deploy/.github/workflows/rolling-update.yml@v1
+    uses: staxless/staxless-workflows/.github/workflows/rolling-update.yml@v1
     with:
       services: ${{ inputs.services || 'all' }}
       auto_detect: ${{ github.event_name == 'push' }}
@@ -62,7 +62,7 @@ on:
 
 jobs:
   deploy:
-    uses: staxless/staxless-deploy/.github/workflows/initial-deploy.yml@v1
+    uses: staxless/staxless-workflows/.github/workflows/initial-deploy.yml@v1
     with:
       domain: ${{ vars.DOMAIN }}
     secrets: inherit
@@ -82,7 +82,7 @@ on:
 
 jobs:
   add:
-    uses: staxless/staxless-deploy/.github/workflows/add-service.yml@v1
+    uses: staxless/staxless-workflows/.github/workflows/add-service.yml@v1
     with:
       service_name: ${{ inputs.service_name }}
     secrets: inherit
@@ -102,9 +102,22 @@ on:
 
 jobs:
   destroy:
-    uses: staxless/staxless-deploy/.github/workflows/destroy.yml@v1
+    uses: staxless/staxless-workflows/.github/workflows/destroy.yml@v1
     with:
       confirm: ${{ inputs.confirm_destroy }}
+    secrets: inherit
+```
+
+**release.yaml** — Semantic release on push to main:
+
+```yaml
+name: "5. Release"
+on:
+  push:
+    branches: [main]
+jobs:
+  release:
+    uses: staxless/staxless-workflows/.github/workflows/release.yml@v1
     secrets: inherit
 ```
 
@@ -118,6 +131,7 @@ jobs:
 | `rolling-update.yml` | Rolling updates with auto-detect and convergence verification |
 | `add-service.yml` | Deploy a new service to an existing stack |
 | `destroy.yml` | Graceful shutdown + infrastructure teardown |
+| `release.yml` | Semantic-release automation |
 
 ---
 
@@ -194,12 +208,13 @@ The entire flow is idempotent — re-running the workflow safely finds and reuse
 ## Project Structure
 
 ```
-staxless-deploy/
+staxless-workflows/
 ├── .github/workflows/          # Reusable workflows
 │   ├── initial-deploy.yml      # Full infra + services
 │   ├── rolling-update.yml      # Rolling updates
 │   ├── add-service.yml         # New service deployment
-│   └── destroy.yml             # Teardown
+│   ├── destroy.yml             # Teardown
+│   └── release.yml             # Semantic release
 ├── actions/                    # Composite actions
 │   ├── setup-ssh/              # SSH key + known_hosts
 │   ├── setup-tools/            # Terraform, doctl, jq
@@ -227,8 +242,8 @@ staxless-deploy/
 ## Architecture
 
 ```
-Consumer Repo                    staxless-deploy
-├── docker/                      ├── .github/workflows/    (4 reusable workflows)
+Consumer Repo                    staxless-workflows
+├── docker/                      ├── .github/workflows/    (5 reusable workflows)
 │   ├── compose/                 ├── actions/              (12 composite actions)
 │   ├── docker-bake.hcl          ├── infrastructure/       (Terraform per provider)
 │   └── dockerfiles/             ├── scripts/              (Shell scripts)
@@ -238,7 +253,8 @@ Consumer Repo                    staxless-deploy
     ├── deploy.yml              # Auto-triggers on push
     ├── initial-deploy.yml      # Manual: first-time setup
     ├── add-service.yml         # Manual: add a service
-    └── destroy.yml             # Manual: tear down
+    ├── destroy.yml             # Manual: tear down
+    └── release.yaml            # Auto-release on push
 ```
 
 ---
@@ -260,7 +276,7 @@ Currently supported: **DigitalOcean**. AWS skeleton included for future use.
 
 - [Staxless](https://staxless.com)
 - [CLI Documentation](https://github.com/Staxless/staxless-cli)
-- [Report Issues](https://github.com/Staxless/staxless-deploy/issues)
+- [Report Issues](https://github.com/Staxless/staxless-workflows/issues)
 
 ---
 

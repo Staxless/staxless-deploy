@@ -1,4 +1,4 @@
-name: Destroy
+name: "4. Destroy"
 
 on:
   workflow_call:
@@ -54,45 +54,45 @@ jobs:
       - name: Checkout consumer repo
         uses: actions/checkout@v4
 
-      - name: Checkout staxless-deploy
+      - name: Checkout staxless-workflows
         uses: actions/checkout@v4
         with:
-          repository: staxless/staxless-deploy
-          path: .staxless-deploy
+          repository: staxless/staxless-workflows
+          path: .staxless-workflows
 
       - name: Resolve Config
         id: config
-        uses: ./.staxless-deploy/actions/resolve-config
+        uses: ./.staxless-workflows/actions/resolve-config
         with:
           stack_name: ${{ inputs.stack_name }}
           region: ${{ inputs.region }}
 
       - name: Setup SSH
-        uses: ./.staxless-deploy/actions/setup-ssh
+        uses: ./.staxless-workflows/actions/setup-ssh
         with:
           ssh_private_key: ${{ secrets.SSH_PRIVATE_KEY }}
 
       - name: Setup Tools
-        uses: ./.staxless-deploy/actions/setup-tools
+        uses: ./.staxless-workflows/actions/setup-tools
         with:
           do_token: ${{ secrets.DIGITALOCEAN_TOKEN }}
           cloud_provider: ${{ inputs.cloud_provider }}
 
       - name: Whitelist SSH
-        uses: ./.staxless-deploy/actions/whitelist-ssh
+        uses: ./.staxless-workflows/actions/whitelist-ssh
         with:
           do_token: ${{ secrets.DIGITALOCEAN_TOKEN }}
           stack_name: ${{ steps.config.outputs.stack_name }}
 
       - name: Graceful Shutdown
-        uses: ./.staxless-deploy/actions/graceful-shutdown
+        uses: ./.staxless-workflows/actions/graceful-shutdown
         with:
           manager_ip: ${{ secrets.MANAGER_IP }}
           stack_name: ${{ steps.config.outputs.stack_name }}
         continue-on-error: true
 
       - name: Destroy Infrastructure
-        uses: ./.staxless-deploy/actions/terraform-destroy
+        uses: ./.staxless-workflows/actions/terraform-destroy
         with:
           cloud_provider: ${{ inputs.cloud_provider }}
           do_token: ${{ secrets.DIGITALOCEAN_TOKEN }}
@@ -107,7 +107,7 @@ jobs:
 
       - name: Remove SSH Whitelist
         if: always()
-        uses: ./.staxless-deploy/actions/remove-ssh
+        uses: ./.staxless-workflows/actions/remove-ssh
         with:
           do_token: ${{ secrets.DIGITALOCEAN_TOKEN }}
           stack_name: ${{ steps.config.outputs.stack_name }}
