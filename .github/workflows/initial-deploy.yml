@@ -462,6 +462,13 @@ jobs:
           manager_ip: ${{ needs.provision.outputs.manager_ip }}
           stack_name: ${{ needs.provision.outputs.stack_name }}
 
+      - name: Save MANAGER_IP as repo secret
+        env:
+          GH_TOKEN: ${{ secrets.GHCR_TOKEN }}
+        run: |
+          echo "${{ needs.provision.outputs.manager_ip }}" | gh secret set MANAGER_IP --repo "$GITHUB_REPOSITORY"
+          echo "MANAGER_IP saved as GitHub secret"
+
       - name: Remove stack and volumes on failure
         if: failure()
         run: |
