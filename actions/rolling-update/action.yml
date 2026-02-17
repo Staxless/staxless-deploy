@@ -42,66 +42,114 @@ runs:
           done
         fi
 
-        FAILED=0
-        for service in $SERVICE_LIST; do
-          echo ""
-          echo "=== Updating: $service ==="
+        # --- Function to update a single service ---
+        update_service() {
+          local service="$1"
+          local log_file="$2"
 
-          CURRENT_IMAGE=$(ssh root@"$MANAGER_IP" "docker service inspect $service --format '{{.Spec.TaskTemplate.ContainerSpec.Image}}'")
-          IMAGE_BASE=$(echo "$CURRENT_IMAGE" | cut -d: -f1)
-          NEW_IMAGE="${IMAGE_BASE}:latest"
+          {
+            echo "=== Updating: $service ==="
 
-          echo "Current: $CURRENT_IMAGE"
-          echo "Target:  $NEW_IMAGE"
+            CURRENT_IMAGE=$(ssh root@"$MANAGER_IP" "docker service inspect $service --format '{{.Spec.TaskTemplate.ContainerSpec.Image}}'")
+            IMAGE_BASE=$(echo "$CURRENT_IMAGE" | cut -d: -f1)
+            NEW_IMAGE="${IMAGE_BASE}:latest"
 
-          ssh root@"$MANAGER_IP" "docker service update \
-            --image $NEW_IMAGE \
-            --update-parallelism 1 \
-            --update-delay 10s \
-            --update-failure-action rollback \
-            --update-monitor 30s \
-            $service"
+            # Get the digest of what's currently running (image@sha256:...)
+            CURRENT_DIGEST=$(echo "$CURRENT_IMAGE" | grep -o 'sha256:[a-f0-9]*' || echo "")
 
-          # Wait for convergence — verify tasks are running the new image
-          ELAPSED=0
-          INTERVAL=10
-          CONVERGED=false
+            # Get the digest of the latest tag in the registry
+            LATEST_DIGEST=$(ssh root@"$MANAGER_IP" "docker pull $NEW_IMAGE 2>/dev/null | grep 'Digest:' | awk '{print \$2}'" || echo "")
 
-          while [ "$ELAPSED" -lt "$MAX_WAIT" ]; do
-            sleep "$INTERVAL"
-            ELAPSED=$((ELAPSED + INTERVAL))
+            echo "Current: $CURRENT_IMAGE"
+            echo "Target:  $NEW_IMAGE"
+            echo "Current digest: ${CURRENT_DIGEST:-none}"
+            echo "Latest digest:  ${LATEST_DIGEST:-none}"
 
-            STATE=$(ssh root@"$MANAGER_IP" "docker service inspect $service --format '{{if .UpdateStatus}}{{.UpdateStatus.State}}{{else}}unknown{{end}}'")
-
-            if [ "$STATE" = "completed" ] || [ "$STATE" = "unknown" ]; then
-              # Verify running tasks match the desired image
-              RUNNING_IMAGES=$(ssh root@"$MANAGER_IP" "docker service ps $service --filter desired-state=running --format '{{.Image}}' | sort -u")
-
-              if echo "$RUNNING_IMAGES" | grep -q "$IMAGE_BASE"; then
-                if [ "$STATE" = "unknown" ]; then
-                  echo "$service already running target image — no update needed (${ELAPSED}s)"
-                else
-                  echo "$service converged on $NEW_IMAGE (${ELAPSED}s)"
-                fi
-                CONVERGED=true
-                break
-              fi
-            elif [ "$STATE" = "rollback_completed" ]; then
-              echo "FAILED: $service rolled back to previous image"
-              FAILED=1
-              CONVERGED=true
-              break
+            # Skip if digests match — no actual change
+            if [ -n "$CURRENT_DIGEST" ] && [ -n "$LATEST_DIGEST" ] && [ "$CURRENT_DIGEST" = "$LATEST_DIGEST" ]; then
+              echo "SKIP: $service already running latest image — no update needed"
+              exit 0
             fi
 
-            echo "  waiting for $service to converge (${ELAPSED}/${MAX_WAIT}s, state=$STATE)"
-          done
+            ssh root@"$MANAGER_IP" "docker service update \
+              --image $NEW_IMAGE \
+              --update-parallelism 1 \
+              --update-delay 10s \
+              --update-failure-action rollback \
+              --update-monitor 30s \
+              $service"
 
-          if [ "$CONVERGED" = "false" ]; then
-            echo "FAILED: $service did not converge within ${MAX_WAIT}s (state=$STATE)"
-            ssh root@"$MANAGER_IP" "docker service ps $service --no-trunc" || true
+            # Wait for convergence
+            ELAPSED=0
+            INTERVAL=10
+            CONVERGED=false
+
+            while [ "$ELAPSED" -lt "$MAX_WAIT" ]; do
+              sleep "$INTERVAL"
+              ELAPSED=$((ELAPSED + INTERVAL))
+
+              STATE=$(ssh root@"$MANAGER_IP" "docker service inspect $service --format '{{if .UpdateStatus}}{{.UpdateStatus.State}}{{else}}unknown{{end}}'")
+
+              if [ "$STATE" = "completed" ] || [ "$STATE" = "unknown" ]; then
+                RUNNING_IMAGES=$(ssh root@"$MANAGER_IP" "docker service ps $service --filter desired-state=running --format '{{.Image}}' | sort -u")
+
+                if echo "$RUNNING_IMAGES" | grep -q "$IMAGE_BASE"; then
+                  echo "$service converged on $NEW_IMAGE (${ELAPSED}s)"
+                  CONVERGED=true
+                  break
+                fi
+              elif [ "$STATE" = "rollback_completed" ]; then
+                echo "FAILED: $service rolled back to previous image"
+                exit 1
+              fi
+
+              echo "  waiting for $service to converge (${ELAPSED}/${MAX_WAIT}s, state=$STATE)"
+            done
+
+            if [ "$CONVERGED" = "false" ]; then
+              echo "FAILED: $service did not converge within ${MAX_WAIT}s (state=$STATE)"
+              ssh root@"$MANAGER_IP" "docker service ps $service --no-trunc" || true
+              exit 1
+            fi
+          } > "$log_file" 2>&1
+        }
+
+        # --- Launch all updates in parallel ---
+        PIDS=()
+        LOG_FILES=()
+        SERVICE_NAMES_ORDERED=()
+        TMPDIR=$(mktemp -d)
+
+        for service in $SERVICE_LIST; do
+          LOG_FILE="$TMPDIR/${service}.log"
+          LOG_FILES+=("$LOG_FILE")
+          SERVICE_NAMES_ORDERED+=("$service")
+          update_service "$service" "$LOG_FILE" &
+          PIDS+=($!)
+        done
+
+        echo ""
+        echo "Launched ${#PIDS[@]} parallel updates, waiting for completion..."
+        echo ""
+
+        # --- Wait for all and collect results ---
+        FAILED=0
+        for i in "${!PIDS[@]}"; do
+          pid="${PIDS[$i]}"
+          service="${SERVICE_NAMES_ORDERED[$i]}"
+          log_file="${LOG_FILES[$i]}"
+
+          if wait "$pid"; then
+            echo "--- $service: OK ---"
+          else
+            echo "--- $service: FAILED ---"
             FAILED=1
           fi
+          cat "$log_file"
+          echo ""
         done
+
+        rm -rf "$TMPDIR"
 
         echo ""
         if [ "$FAILED" -eq 1 ]; then
