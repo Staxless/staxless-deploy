@@ -110,6 +110,7 @@ runs:
             fi
 
             ssh root@"$MANAGER_IP" "docker service update \
+              --with-registry-auth \
               --image $NEW_IMAGE \
               --update-parallelism 1 \
               --update-delay 10s \
