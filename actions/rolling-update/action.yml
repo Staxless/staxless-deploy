@@ -89,7 +89,7 @@ runs:
             echo "=== Updating: $service ==="
 
             CURRENT_IMAGE=$(ssh root@"$MANAGER_IP" "docker service inspect $service --format '{{.Spec.TaskTemplate.ContainerSpec.Image}}'")
-            IMAGE_BASE=$(echo "$CURRENT_IMAGE" | cut -d: -f1)
+            IMAGE_BASE=$(echo "$CURRENT_IMAGE" | sed 's/@sha256:.*//' | cut -d: -f1)
             NEW_IMAGE="${IMAGE_BASE}:latest"
 
             # Get the digest of what's currently running (image@sha256:...)

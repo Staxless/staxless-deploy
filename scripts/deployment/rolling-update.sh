@@ -24,7 +24,7 @@ for service in $SERVICE_LIST; do
   echo "Updating: $service"
 
   CURRENT_IMAGE=$(ssh root@"$MANAGER_IP" "docker service inspect $service --format '{{.Spec.TaskTemplate.ContainerSpec.Image}}'")
-  IMAGE_BASE=$(echo "$CURRENT_IMAGE" | cut -d: -f1)
+  IMAGE_BASE=$(echo "$CURRENT_IMAGE" | sed 's/@sha256:.*//' | cut -d: -f1)
   NEW_IMAGE="${IMAGE_BASE}:latest"
 
   CURRENT_DIGEST=$(echo "$CURRENT_IMAGE" | grep -o 'sha256:[a-f0-9]*' || echo "")
